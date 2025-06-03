@@ -1,0 +1,102 @@
+# deployment/consensus_config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ndml-consensus-config
+data:
+  consensus.yaml: |
+    consensus:
+      # Node configuration
+      node_id: "${NODE_ID}"
+      cluster_name: "${CLUSTER_NAME}"
+      
+      # Network settings
+      network:
+        port: 8080
+        max_connections: 100
+        heartbeat_interval: 30
+        timeout: 10
+        
+      # VO2 processor settings
+      vo2:
+        oscillators: 64
+        similarity_threshold: 0.8
+        adaptation_rate: 0.05
+        
+      # CRDT settings
+      crdt:
+        sync_interval: 60
+        batch_size: 100
+        compression: true
+        
+      # Bloom filter settings
+      bloom:
+        capacity: 1000000
+        error_rate: 0.01
+        auto_resize: true
+        
+      # Performance tuning
+      performance:
+        batch_size: 32
+        async_workers: 4
+        memory_limit: "8Gi"
+        cpu_limit: "4"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ndml-consensus-node
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ndml-consensus
+  template:
+    metadata:
+      labels:
+        app: ndml-consensus
+    spec:
+      containers:
+      - name: consensus-node
+        image: ndml/consensus-node:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: CLUSTER_NAME
+          value: "ndml-cluster"
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/ndml
+        - name: data-volume
+          mountPath: /data
+      volumes:
+      - name: config-volume
+        configMap:
+          name: ndml-consensus-config
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: ndml-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ndml-consensus-service
+spec:
+  selector:
+    app: ndml-consensus
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP
