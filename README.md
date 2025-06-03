@@ -91,7 +91,7 @@ NDML consists of five main layers:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/ndml.git
+git clone https://github.com/Mklevns/ndml.git
 cd ndml
 
 # Run installation script
@@ -541,7 +541,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 
 ```bash
 # Fork and clone the repository
-git clone https://github.com/your-username/ndml.git
+git clone https://github.com/Mklevns/ndml.git
 
 # Create a feature branch
 git checkout -b feature/your-feature
@@ -572,9 +572,9 @@ If you use NDML in your research, please cite:
 ```bibtex
 @software{ndml2024,
   title = {NDML: Neuro-inspired Distributed Memory Layer for Large Language Models},
-  author = {Your Name},
-  year = {2024},
-  url = {https://github.com/your-org/ndml}
+  author = {Michael Evans},
+  year = {2025},
+  url = {https://github.com/Mklevns/ndml}
 }
 ```
 
