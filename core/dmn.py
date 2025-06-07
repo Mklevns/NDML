@@ -1,4 +1,4 @@
-# core/dmn.py
+# core/dmn.py - Enhanced with comprehensive temporal integration
 import asyncio
 import torch
 import torch.nn as nn
@@ -13,7 +13,7 @@ from collections import defaultdict, deque
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from .memory_trace import MemoryTrace
+from .memory_trace import MemoryTrace, TemporalMetadata, ConsolidationState
 from .btsp import BTSPUpdateMechanism
 from .lifecycle import MemoryLifecycleManager
 from .dynamics import MultiTimescaleDynamicsEngine
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class EnhancedDistributedMemoryNode(nn.Module):
-    """Production-ready DMN with all optimizations and biological features"""
+    """Production-ready DMN with all optimizations, biological features, and temporal dynamics integration"""
 
     def __init__(self,
                  node_id: str,
@@ -41,23 +41,27 @@ class EnhancedDistributedMemoryNode(nn.Module):
         self.device = device
         self.config = config or self._default_config()
 
-        # Initialize core components
+        # Initialize core components (PRESERVED)
         self._init_memory_storage()
         self._init_weight_matrices()
         self._init_biological_mechanisms()
         self._init_indexing_system()
         self._init_performance_tracking()
 
-        # Thread-safe operations
+        # NEW: Initialize temporal integration
+        self._init_temporal_integration()
+
+        # Thread-safe operations (PRESERVED)
         self.lock = threading.RLock()
         self.async_executor = ThreadPoolExecutor(max_workers=4)
 
         logger.info(
-            f"Enhanced DMN {node_id} initialized: {dimension}D, capacity={capacity}, specialization={specialization}")
+            f"Enhanced DMN {node_id} initialized: {dimension}D, capacity={capacity}, "
+            f"specialization={specialization}, temporal_enabled={self.temporal_enabled}")
 
     def _default_config(self) -> Dict[str, Any]:
-        """Default configuration parameters"""
-        return {
+        """Default configuration parameters (ENHANCED with temporal settings)"""
+        base_config = {
             'btsp': {
                 'calcium_threshold': 0.7,
                 'decay_rate': 0.95,
@@ -92,16 +96,44 @@ class EnhancedDistributedMemoryNode(nn.Module):
                 'competition_strength': 0.1
             }
         }
+        
+        # NEW: Temporal configuration
+        base_config['temporal'] = {
+            'enabled': True,
+            'injection_rate': 0.1,
+            'consolidation_threshold': 0.7,
+            'temporal_context_weight': 0.3,
+            'age_category_weights': {
+                'fast_synaptic': 1.2,
+                'calcium_plasticity': 1.0,
+                'protein_synthesis': 0.8,
+                'homeostatic_scaling': 0.6,
+                'systems_consolidation': 0.4
+            },
+            'consolidation_state_weights': {
+                'INITIAL': 1.0,
+                'CONSOLIDATING': 1.1,
+                'CONSOLIDATED': 1.2,
+                'STABLE': 1.3
+            },
+            'event_injection_thresholds': {
+                'high_salience_threshold': 0.8,
+                'consolidation_ready_threshold': 0.7,
+                'temporal_activity_threshold': 0.6
+            }
+        }
+        
+        return base_config
 
     def _init_memory_storage(self):
-        """Initialize memory storage structures"""
+        """Initialize memory storage structures (PRESERVED)"""
         self.memory_traces: List[MemoryTrace] = []
         self.trace_index: Dict[str, int] = {}  # trace_id -> list index
         self.specialization_counts: Dict[str, int] = defaultdict(int)
         self.access_patterns: Dict[str, deque] = defaultdict(lambda: deque(maxlen=100))
 
     def _init_weight_matrices(self):
-        """Initialize fast and slow weight matrices"""
+        """Initialize fast and slow weight matrices (PRESERVED)"""
         # Fast weights for rapid adaptation
         self.fast_weights = nn.Parameter(
             torch.randn(self.capacity, self.dimension, device=self.device) * 0.01
@@ -117,7 +149,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
         self.last_weight_update = torch.zeros(self.capacity, device=self.device)
 
     def _init_biological_mechanisms(self):
-        """Initialize biological plasticity mechanisms"""
+        """Initialize biological plasticity mechanisms (PRESERVED)"""
         self.btsp_mechanism = BTSPUpdateMechanism(
             **self.config['btsp']
         )
@@ -135,7 +167,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
         )
 
     def _init_indexing_system(self):
-        """Initialize FAISS indexing with optimizations"""
+        """Initialize FAISS indexing with optimizations (PRESERVED)"""
         index_config = self.config['indexing']
 
         if index_config['index_type'] == 'HNSW':
@@ -164,7 +196,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
         self.faiss_id_to_trace_id: Dict[int, str] = {}
 
     def _init_performance_tracking(self):
-        """Initialize performance and statistics tracking"""
+        """Initialize performance and statistics tracking (ENHANCED with temporal metrics)"""
         self.stats = {
             'total_traces': 0,
             'total_retrievals': 0,
@@ -178,19 +210,165 @@ class EnhancedDistributedMemoryNode(nn.Module):
             'memory_utilization': 0.0
         }
 
+        # NEW: Temporal statistics
+        self.temporal_stats = {
+            'temporal_events_injected': 0,
+            'temporal_consolidations': 0,
+            'temporal_modulations_applied': 0,
+            'age_category_distribution': defaultdict(int),
+            'consolidation_state_distribution': defaultdict(int),
+            'temporal_coherence_history': deque(maxlen=100),
+            'temporal_priority_distribution': defaultdict(int),
+            'cross_timescale_activations': 0
+        }
+
         self.performance_history = deque(maxlen=1000)
         self.last_stats_update = time.time()
+
+    def _init_temporal_integration(self):
+        """Initialize temporal dynamics integration (NEW)"""
+        temporal_config = self.config.get('temporal', {})
+        
+        self.temporal_enabled = temporal_config.get('enabled', True)
+        self.temporal_injection_rate = temporal_config.get('injection_rate', 0.1)
+        self.temporal_consolidation_threshold = temporal_config.get('consolidation_threshold', 0.7)
+        self.temporal_context_weight = temporal_config.get('temporal_context_weight', 0.3)
+        
+        # Temporal weighting schemes
+        self.age_category_weights = temporal_config.get('age_category_weights', {})
+        self.consolidation_state_weights = temporal_config.get('consolidation_state_weights', {})
+        self.event_injection_thresholds = temporal_config.get('event_injection_thresholds', {})
+        
+        # Temporal integration state
+        self.external_temporal_engine: Optional['MultiTimescaleDynamicsEngine'] = None
+        self.temporal_context_cache: Dict[str, Any] = {}
+        self.last_temporal_update = time.time()
+        
+        # Event injection tracking
+        self.temporal_event_queue = asyncio.Queue() if self.temporal_enabled else None
+        self.temporal_injection_history = deque(maxlen=1000) if self.temporal_enabled else None
+
+    # NEW: Temporal integration methods
+    async def integrate_temporal_dynamics(self, temporal_engine: 'MultiTimescaleDynamicsEngine') -> None:
+        """Integrate with external multi-timescale dynamics engine."""
+        if not self.temporal_enabled:
+            logger.warning(f"DMN {self.node_id}: Temporal integration disabled")
+            return
+            
+        self.external_temporal_engine = temporal_engine
+        
+        # Register this DMN with the temporal engine
+        if hasattr(temporal_engine, 'integrate_with_dmn'):
+            temporal_engine.integrate_with_dmn(self.node_id, self)
+            
+        logger.info(f"DMN {self.node_id} integrated with temporal dynamics engine")
+
+    async def update_temporal_context(self, temporal_context: Dict[str, Any]) -> None:
+        """Update temporal context from external temporal engine."""
+        if not self.temporal_enabled:
+            return
+            
+        self.temporal_context_cache = temporal_context.copy()
+        self.last_temporal_update = time.time()
+        
+        # Update temporal coherence history
+        coherence = temporal_context.get('temporal_coherence', 1.0)
+        self.temporal_stats['temporal_coherence_history'].append(coherence)
+        
+        # Update memory traces with new temporal context
+        await self._update_traces_temporal_state(temporal_context)
+
+    async def _update_traces_temporal_state(self, temporal_context: Dict[str, Any]) -> None:
+        """Update temporal state for all memory traces."""
+        if not self.temporal_enabled:
+            return
+            
+        current_time = time.time()
+        updated_count = 0
+        
+        for trace in self.memory_traces:
+            # Update temporal metadata
+            trace.update_temporal_state(temporal_context)
+            
+            # Update age category distribution
+            age_category = trace.get_temporal_age_category()
+            self.temporal_stats['age_category_distribution'][age_category] += 1
+            
+            # Update consolidation state distribution
+            consolidation_state = trace.temporal_metadata.consolidation_state.value
+            self.temporal_stats['consolidation_state_distribution'][consolidation_state] += 1
+            
+            updated_count += 1
+            
+        logger.debug(f"DMN {self.node_id}: Updated temporal state for {updated_count} traces")
+
+    async def inject_temporal_event(self, event_type: str, event_data: Dict[str, Any]) -> bool:
+        """Inject temporal events into external temporal engine."""
+        if not self.temporal_enabled or not self.external_temporal_engine:
+            return False
+            
+        try:
+            # Map DMN events to temporal engine events
+            if event_type == "high_salience_storage":
+                success = await self.external_temporal_engine.inject_event(
+                    "memory_trace_activation",
+                    "fast_synaptic",
+                    {
+                        **event_data,
+                        "source_dmn": self.node_id,
+                        "injection_time": time.time()
+                    }
+                )
+                
+            elif event_type == "consolidation_ready":
+                success = await self.external_temporal_engine.inject_event(
+                    "consolidation_request",
+                    "protein_synthesis", 
+                    {
+                        **event_data,
+                        "source_dmn": self.node_id,
+                        "injection_time": time.time()
+                    }
+                )
+                
+            elif event_type == "retrieval_pattern":
+                success = await self.external_temporal_engine.inject_event(
+                    "retrieval_activity",
+                    "calcium_plasticity",
+                    {
+                        **event_data,
+                        "source_dmn": self.node_id,
+                        "injection_time": time.time()
+                    }
+                )
+            else:
+                logger.warning(f"DMN {self.node_id}: Unknown temporal event type: {event_type}")
+                return False
+                
+            if success:
+                self.temporal_stats['temporal_events_injected'] += 1
+                self.temporal_injection_history.append({
+                    'event_type': event_type,
+                    'timestamp': time.time(),
+                    'data': event_data
+                })
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"DMN {self.node_id}: Temporal event injection failed: {e}")
+            return False
 
     async def add_memory_trace_async(self,
                                      content: torch.Tensor,
                                      context: Dict[str, Any],
                                      salience: float,
                                      user_feedback: Optional[Dict[str, Any]] = None) -> bool:
-        """Add memory trace with full biological processing"""
+        """Add memory trace with full biological processing (ENHANCED with temporal integration)"""
 
         current_time = time.time()
 
-        # Create memory trace
+        # Create memory trace (PRESERVED)
         trace = MemoryTrace(
             content=content.detach().cpu(),
             context=context.copy(),
@@ -199,7 +377,11 @@ class EnhancedDistributedMemoryNode(nn.Module):
             creation_node=self.node_id
         )
 
-        # Compute update decision using BTSP mechanism
+        # NEW: Initialize temporal metadata
+        if self.temporal_enabled and self.temporal_context_cache:
+            trace.update_temporal_state(self.temporal_context_cache)
+
+        # Compute update decision using BTSP mechanism (PRESERVED)
         update_decision = await self.btsp_mechanism.should_update_async(
             input_state=content,
             existing_traces=self.memory_traces[-50:],  # Check recent traces
@@ -211,11 +393,11 @@ class EnhancedDistributedMemoryNode(nn.Module):
             logger.debug(f"DMN {self.node_id}: Update rejected for trace {trace.trace_id}")
             return False
 
-        # Check capacity and evict if necessary
+        # Check capacity and evict if necessary (PRESERVED)
         if len(self.memory_traces) >= self.capacity:
             await self._intelligent_eviction_async()
 
-        # Add trace to storage
+        # Add trace to storage (PRESERVED)
         with self.lock:
             self.memory_traces.append(trace)
             self.trace_index[trace.trace_id] = len(self.memory_traces) - 1
@@ -224,30 +406,75 @@ class EnhancedDistributedMemoryNode(nn.Module):
             specialization = context.get('domain', 'general')
             self.specialization_counts[specialization] += 1
 
-        # Add to FAISS index
+        # Add to FAISS index (PRESERVED)
         await self._add_to_index_async(trace)
 
-        # Update biological dynamics
+        # Update biological dynamics (PRESERVED)
         await self.dynamics_engine.process_update_async(
             content, salience, update_decision.calcium_level
         )
 
-        # Update fast weights
+        # Update fast weights (PRESERVED)
         await self._update_fast_weights_async(content, salience, update_decision.learning_rate)
 
-        # Update statistics
+        # NEW: Temporal event injection
+        if self.temporal_enabled:
+            await self._handle_temporal_events_on_storage(trace, update_decision)
+
+        # Update statistics (ENHANCED)
         self.stats['total_traces'] += 1
         self.stats['total_updates'] += 1
+        
+        if self.temporal_enabled:
+            age_category = trace.get_temporal_age_category()
+            self.temporal_stats['age_category_distribution'][age_category] += 1
 
         logger.debug(f"DMN {self.node_id}: Added trace {trace.trace_id}")
         return True
+
+    async def _handle_temporal_events_on_storage(self, trace: MemoryTrace, update_decision) -> None:
+        """Handle temporal events during memory storage (NEW)"""
+        
+        # High salience traces trigger fast synaptic events
+        if trace.salience >= self.event_injection_thresholds.get('high_salience_threshold', 0.8):
+            await self.inject_temporal_event(
+                "high_salience_storage",
+                {
+                    "trace_data": {
+                        "content": trace.content.numpy().tolist(),
+                        "trace_id": trace.trace_id,
+                        "salience": trace.salience
+                    },
+                    "update_decision": {
+                        "calcium_level": update_decision.calcium_level,
+                        "learning_rate": update_decision.learning_rate
+                    }
+                }
+            )
+            
+        # Traces ready for consolidation
+        if trace.should_consolidate(self.temporal_consolidation_threshold):
+            await self.inject_temporal_event(
+                "consolidation_ready",
+                {
+                    "memory_data": {
+                        "trace_id": trace.trace_id,
+                        "content": trace.content.numpy().tolist(),
+                        "salience": trace.salience,
+                        "context": trace.context,
+                        "consolidation_strength": trace.temporal_metadata.consolidation_strength
+                    },
+                    "priority": trace.get_temporal_priority()
+                }
+            )
 
     async def retrieve_memories_async(self,
                                       query: torch.Tensor,
                                       k: int = 10,
                                       context_filter: Optional[Dict[str, Any]] = None,
-                                      similarity_threshold: float = None) -> List[Tuple[MemoryTrace, float]]:
-        """Advanced memory retrieval with context filtering"""
+                                      similarity_threshold: float = None,
+                                      temporal_context: Optional[Dict[str, Any]] = None) -> List[Tuple[MemoryTrace, float]]:
+        """Advanced memory retrieval with context filtering (ENHANCED with temporal modulation)"""
 
         if self.index.ntotal == 0:
             return []
@@ -256,17 +483,21 @@ class EnhancedDistributedMemoryNode(nn.Module):
         if similarity_threshold is None:
             similarity_threshold = self.config['indexing']['similarity_threshold']
 
-        # Prepare normalized query
+        # NEW: Use provided temporal context or cached context
+        if temporal_context is None and self.temporal_enabled:
+            temporal_context = self.temporal_context_cache
+
+        # Prepare normalized query (PRESERVED)
         query_normalized = F.normalize(query.to(self.device), dim=0)
         query_np = query_normalized.detach().cpu().numpy().astype('float32').reshape(1, -1)
 
-        # Perform FAISS search
+        # Perform FAISS search (PRESERVED)
         try:
             # Search more than k to allow for filtering
             search_k = min(k * 3, self.index.ntotal)
             similarities, faiss_ids = self.index.search(query_np, search_k)
 
-            # Process results
+            # Process results (ENHANCED with temporal modulation)
             results = []
             current_time = time.time()
 
@@ -284,25 +515,38 @@ class EnhancedDistributedMemoryNode(nn.Module):
 
                 trace = self.memory_traces[trace_idx]
 
-                # Apply context filtering
+                # Apply context filtering (PRESERVED)
                 if context_filter and not self._matches_context_filter(trace, context_filter):
                     continue
 
-                # Update access statistics
+                # NEW: Apply temporal modulation to similarity
+                if self.temporal_enabled and temporal_context:
+                    modulated_sim = self._apply_temporal_modulation(sim, trace, temporal_context)
+                else:
+                    modulated_sim = sim
+
+                # Update access statistics (PRESERVED)
                 trace.update_access_stats(current_time, context_relevant=True)
 
-                # Record access pattern for dynamics
+                # Record access pattern for dynamics (PRESERVED)
                 self.access_patterns[trace_id].append(current_time)
 
-                results.append((trace, float(sim)))
+                results.append((trace, float(modulated_sim)))
 
                 if len(results) >= k:
                     break
 
-            # Update dynamics engine with retrieval pattern
+            # Sort by modulated similarity
+            results.sort(key=lambda x: x[1], reverse=True)
+
+            # Update dynamics engine with retrieval pattern (PRESERVED)
             await self.dynamics_engine.process_retrieval_async(
                 query, [trace for trace, _ in results]
             )
+
+            # NEW: Inject temporal retrieval events
+            if self.temporal_enabled and results:
+                await self._handle_temporal_events_on_retrieval(query, results, temporal_context)
 
             self.stats['total_retrievals'] += 1
             return results
@@ -311,8 +555,97 @@ class EnhancedDistributedMemoryNode(nn.Module):
             logger.error(f"DMN {self.node_id}: Retrieval error: {e}")
             return []
 
+    def _apply_temporal_modulation(self, base_similarity: float, 
+                                 trace: MemoryTrace, 
+                                 temporal_context: Dict[str, Any]) -> float:
+        """Apply temporal modulation to similarity scores (NEW)"""
+        
+        modulated_similarity = base_similarity
+        
+        # Age category modulation
+        age_category = trace.get_temporal_age_category()
+        age_weight = self.age_category_weights.get(age_category, 1.0)
+        modulated_similarity *= age_weight
+        
+        # Consolidation state modulation
+        consolidation_state = trace.temporal_metadata.consolidation_state.value
+        consolidation_weight = self.consolidation_state_weights.get(consolidation_state, 1.0)
+        modulated_similarity *= consolidation_weight
+        
+        # Fast synaptic activity bias
+        if "fast_synaptic_activity" in temporal_context:
+            fast_activity = temporal_context["fast_synaptic_activity"]
+            trace_age = time.time() - trace.timestamp
+            
+            # Boost recent traces when fast synaptic activity is high
+            if trace_age < 60.0 and fast_activity > 0.7:  # Last minute, high activity
+                modulated_similarity *= 1.2
+                
+        # Consolidation activity bias
+        if "consolidation_activity" in temporal_context:
+            consol_activity = temporal_context["consolidation_activity"]
+            
+            # Boost consolidated traces when consolidation activity is high
+            if (trace.temporal_metadata.consolidation_state == ConsolidationState.CONSOLIDATED and
+                consol_activity > 0.6):
+                modulated_similarity *= 1.1
+                
+        # Temporal coherence modulation
+        temporal_coherence = temporal_context.get("temporal_coherence", 1.0)
+        trace_coherence = trace.temporal_metadata.temporal_coherence
+        
+        # Boost traces with coherence matching system state
+        coherence_match = 1.0 - abs(temporal_coherence - trace_coherence)
+        coherence_factor = 0.9 + 0.2 * coherence_match  # 0.9-1.1 range
+        modulated_similarity *= coherence_factor
+        
+        # Apply temporal context weight
+        final_similarity = (
+            base_similarity * (1 - self.temporal_context_weight) +
+            modulated_similarity * self.temporal_context_weight
+        )
+        
+        # Track temporal modulation application
+        if abs(final_similarity - base_similarity) > 0.01:
+            self.temporal_stats['temporal_modulations_applied'] += 1
+        
+        return final_similarity
+
+    async def _handle_temporal_events_on_retrieval(self, query: torch.Tensor,
+                                                  results: List[Tuple[MemoryTrace, float]],
+                                                  temporal_context: Optional[Dict[str, Any]]) -> None:
+        """Handle temporal events during memory retrieval (NEW)"""
+        
+        if not results:
+            return
+            
+        # Inject retrieval pattern event
+        retrieval_strength = np.mean([similarity for _, similarity in results])
+        
+        if retrieval_strength >= self.event_injection_thresholds.get('temporal_activity_threshold', 0.6):
+            await self.inject_temporal_event(
+                "retrieval_pattern",
+                {
+                    "query_info": {
+                        "query_norm": float(torch.norm(query)),
+                        "retrieval_strength": float(retrieval_strength),
+                        "num_results": len(results)
+                    },
+                    "retrieved_traces": [
+                        {
+                            "trace_id": trace.trace_id,
+                            "similarity": float(similarity),
+                            "age_category": trace.get_temporal_age_category(),
+                            "consolidation_state": trace.temporal_metadata.consolidation_state.value
+                        }
+                        for trace, similarity in results[:5]  # Top 5 traces
+                    ],
+                    "temporal_context": temporal_context
+                }
+            )
+
     def _matches_context_filter(self, trace: MemoryTrace, context_filter: Dict[str, Any]) -> bool:
-        """Check if trace matches context filter criteria"""
+        """Check if trace matches context filter criteria (PRESERVED)"""
         for key, expected_value in context_filter.items():
             if key not in trace.context:
                 return False
@@ -336,7 +669,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
         return True
 
     async def _add_to_index_async(self, trace: MemoryTrace):
-        """Add trace to FAISS index asynchronously"""
+        """Add trace to FAISS index asynchronously (PRESERVED)"""
         content_normalized = F.normalize(trace.content.to(self.device), dim=0)
         content_np = content_normalized.detach().cpu().numpy().astype('float32').reshape(1, -1)
 
@@ -351,18 +684,27 @@ class EnhancedDistributedMemoryNode(nn.Module):
         self.faiss_id_to_trace_id[faiss_id] = trace.trace_id
 
     async def _intelligent_eviction_async(self):
-        """Intelligent memory eviction using multiple criteria"""
+        """Intelligent memory eviction using multiple criteria (ENHANCED with temporal factors)"""
         if not self.memory_traces:
             return
 
         current_time = time.time()
         eviction_batch_size = self.config['lifecycle']['eviction_batch_size']
 
-        # Compute eviction scores for all traces
+        # Compute eviction scores for all traces (ENHANCED)
         scored_traces = []
         for i, trace in enumerate(self.memory_traces):
-            score = trace.compute_decay_score(current_time, self.config['lifecycle']['decay_params'])
-            scored_traces.append((score, i, trace))
+            # Base decay score (PRESERVED)
+            base_score = trace.compute_decay_score(current_time, self.config['lifecycle']['decay_params'])
+            
+            # NEW: Apply temporal adjustments to eviction score
+            if self.temporal_enabled:
+                temporal_score_adjustment = self._compute_temporal_eviction_adjustment(trace)
+                final_score = base_score * temporal_score_adjustment
+            else:
+                final_score = base_score
+                
+            scored_traces.append((final_score, i, trace))
 
         # Sort by score (lowest first = highest eviction priority)
         scored_traces.sort(key=lambda x: x[0])
@@ -370,7 +712,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
         # Select traces for eviction (lowest scores)
         traces_to_evict = scored_traces[:eviction_batch_size]
 
-        # Remove from FAISS index
+        # Remove from FAISS index (PRESERVED)
         faiss_ids_to_remove = []
         for _, _, trace in traces_to_evict:
             for faiss_id, trace_id in self.faiss_id_to_trace_id.items():
@@ -385,7 +727,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
                 if faiss_id in self.faiss_id_to_trace_id:
                     del self.faiss_id_to_trace_id[faiss_id]
 
-        # Remove from memory traces list (in reverse order to maintain indices)
+        # Remove from memory traces list (in reverse order to maintain indices) (PRESERVED)
         eviction_indices = sorted([idx for _, idx, _ in traces_to_evict], reverse=True)
 
         with self.lock:
@@ -412,8 +754,41 @@ class EnhancedDistributedMemoryNode(nn.Module):
         self.stats['evictions'] += len(traces_to_evict)
         logger.info(f"DMN {self.node_id}: Evicted {len(traces_to_evict)} traces")
 
+    def _compute_temporal_eviction_adjustment(self, trace: MemoryTrace) -> float:
+        """Compute temporal adjustment factor for eviction scoring (NEW)"""
+        
+        adjustment_factor = 1.0
+        
+        # Consolidation state protection
+        consolidation_state = trace.temporal_metadata.consolidation_state
+        if consolidation_state == ConsolidationState.CONSOLIDATED:
+            adjustment_factor *= 1.5  # Less likely to be evicted
+        elif consolidation_state == ConsolidationState.STABLE:
+            adjustment_factor *= 2.0  # Much less likely to be evicted
+        elif consolidation_state == ConsolidationState.CONSOLIDATING:
+            adjustment_factor *= 1.2  # Slightly protected
+            
+        # Temporal coherence protection
+        temporal_coherence = trace.temporal_metadata.temporal_coherence
+        if temporal_coherence > 0.8:
+            adjustment_factor *= 1.3  # High coherence traces are protected
+            
+        # Age category consideration
+        age_category = trace.get_temporal_age_category()
+        if age_category == "systems_consolidation":
+            adjustment_factor *= 1.4  # Long-term memories are protected
+        elif age_category == "fast_synaptic":
+            adjustment_factor *= 0.9  # Recent memories slightly more evictable
+            
+        # Consolidation strength protection
+        consolidation_strength = trace.temporal_metadata.consolidation_strength
+        if consolidation_strength > 0.7:
+            adjustment_factor *= 1.2
+            
+        return adjustment_factor
+
     async def _update_fast_weights_async(self, content: torch.Tensor, salience: float, learning_rate: float):
-        """Update fast weights using biological-inspired plasticity"""
+        """Update fast weights using biological-inspired plasticity (PRESERVED)"""
 
         with torch.no_grad():
             content_normalized = F.normalize(content.to(self.device), dim=0)
@@ -444,16 +819,27 @@ class EnhancedDistributedMemoryNode(nn.Module):
             self.last_weight_update[best_slot] = time.time()
 
     async def consolidate_memories_async(self):
-        """Consolidate important memories from fast to slow weights"""
+        """Consolidate important memories from fast to slow weights (ENHANCED with temporal awareness)"""
 
         current_time = time.time()
         consolidation_config = self.config['consolidation']
 
-        # Find traces eligible for consolidation
+        # Find traces eligible for consolidation (ENHANCED)
         eligible_traces = []
         for trace in self.memory_traces:
-            if (trace.current_salience >= consolidation_config['threshold'] or
-                    trace.access_count >= 5):
+            # Original criteria (PRESERVED)
+            basic_eligibility = (trace.current_salience >= consolidation_config['threshold'] or
+                               trace.access_count >= 5)
+            
+            # NEW: Temporal criteria
+            temporal_eligibility = False
+            if self.temporal_enabled:
+                temporal_eligibility = (
+                    trace.should_consolidate(self.temporal_consolidation_threshold) or
+                    trace.temporal_metadata.consolidation_state in [ConsolidationState.CONSOLIDATING, ConsolidationState.CONSOLIDATED]
+                )
+            
+            if basic_eligibility or temporal_eligibility:
                 eligible_traces.append(trace)
 
         if not eligible_traces:
@@ -462,20 +848,30 @@ class EnhancedDistributedMemoryNode(nn.Module):
         # Limit consolidation batch size
         max_traces = consolidation_config['max_traces_per_cycle']
         if len(eligible_traces) > max_traces:
-            # Sort by importance and take top traces
-            eligible_traces.sort(
-                key=lambda t: t.current_salience * np.log1p(t.access_count),
-                reverse=True
-            )
+            # Sort by importance and temporal priority (ENHANCED)
+            def consolidation_priority(trace):
+                base_priority = trace.current_salience * np.log1p(trace.access_count)
+                if self.temporal_enabled:
+                    temporal_priority = trace.get_temporal_priority() / 10.0  # Normalize to [0,1]
+                    return base_priority + temporal_priority
+                return base_priority
+                
+            eligible_traces.sort(key=consolidation_priority, reverse=True)
             eligible_traces = eligible_traces[:max_traces]
 
-        # Compute consolidated representation
+        # Compute consolidated representation (PRESERVED)
         consolidated_vectors = []
         weights = []
 
         for trace in eligible_traces:
             content = trace.content.to(self.device)
             weight = trace.current_salience * np.log1p(trace.access_count)
+            
+            # NEW: Apply temporal weighting
+            if self.temporal_enabled:
+                temporal_weight = trace.get_temporal_priority() / 10.0
+                weight = weight * (0.7 + 0.3 * temporal_weight)
+                
             consolidated_vectors.append(content)
             weights.append(weight)
 
@@ -504,18 +900,74 @@ class EnhancedDistributedMemoryNode(nn.Module):
                     self.slow_weights[oldest_slot], dim=0
                 )
 
-            # Update consolidation level of traces
+            # Update consolidation level of traces (ENHANCED)
             for trace in eligible_traces:
                 trace.consolidation_level = min(2, trace.consolidation_level + 1)
+                
+                # NEW: Update temporal consolidation state
+                if self.temporal_enabled:
+                    if trace.temporal_metadata.consolidation_state == ConsolidationState.CONSOLIDATING:
+                        trace.temporal_metadata.consolidation_state = ConsolidationState.CONSOLIDATED
 
             self.stats['consolidations'] += 1
+            
+            # NEW: Update temporal consolidation stats
+            if self.temporal_enabled:
+                self.temporal_stats['temporal_consolidations'] += 1
+                
             logger.info(f"DMN {self.node_id}: Consolidated {len(eligible_traces)} traces to slot {oldest_slot}")
 
+    # NEW: Temporal-specific methods
+    def get_temporal_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive temporal statistics (NEW)"""
+        if not self.temporal_enabled:
+            return {"temporal_enabled": False}
+            
+        current_time = time.time()
+        
+        # Temporal coherence statistics
+        coherence_history = list(self.temporal_stats['temporal_coherence_history'])
+        
+        # Age category distribution
+        total_traces = sum(self.temporal_stats['age_category_distribution'].values())
+        age_category_percentages = {
+            category: (count / max(1, total_traces)) * 100
+            for category, count in self.temporal_stats['age_category_distribution'].items()
+        }
+        
+        # Consolidation state distribution
+        consolidation_percentages = {
+            state: (count / max(1, total_traces)) * 100
+            for state, count in self.temporal_stats['consolidation_state_distribution'].items()
+        }
+        
+        return {
+            "temporal_enabled": True,
+            "temporal_engine_integrated": self.external_temporal_engine is not None,
+            "last_temporal_update": self.last_temporal_update,
+            "time_since_temporal_update": current_time - self.last_temporal_update,
+            "temporal_events_injected": self.temporal_stats['temporal_events_injected'],
+            "temporal_consolidations": self.temporal_stats['temporal_consolidations'],
+            "temporal_modulations_applied": self.temporal_stats['temporal_modulations_applied'],
+            "cross_timescale_activations": self.temporal_stats['cross_timescale_activations'],
+            "age_category_distribution": age_category_percentages,
+            "consolidation_state_distribution": consolidation_percentages,
+            "temporal_coherence_stats": {
+                "current": coherence_history[-1] if coherence_history else 1.0,
+                "average": np.mean(coherence_history) if coherence_history else 1.0,
+                "std": np.std(coherence_history) if coherence_history else 0.0,
+                "min": np.min(coherence_history) if coherence_history else 1.0,
+                "max": np.max(coherence_history) if coherence_history else 1.0
+            },
+            "temporal_priority_distribution": dict(self.temporal_stats['temporal_priority_distribution']),
+            "recent_injection_events": list(self.temporal_injection_history)[-10:] if self.temporal_injection_history else []
+        }
+
     def get_comprehensive_stats(self) -> Dict[str, Any]:
-        """Get comprehensive node statistics"""
+        """Get comprehensive node statistics (ENHANCED with temporal data)"""
         current_time = time.time()
 
-        # Update derived statistics
+        # Update derived statistics (PRESERVED)
         if self.memory_traces:
             avg_access = sum(trace.access_count for trace in self.memory_traces) / len(self.memory_traces)
             self.stats['average_access_count'] = avg_access
@@ -523,17 +975,21 @@ class EnhancedDistributedMemoryNode(nn.Module):
         self.stats['memory_utilization'] = len(self.memory_traces) / self.capacity
         self.stats['specialization_distribution'] = dict(self.specialization_counts)
 
-        # Add dynamics engine stats
+        # Add dynamics engine stats (PRESERVED)
         dynamics_stats = self.dynamics_engine.get_stats()
 
-        # Add biological mechanism stats
+        # Add biological mechanism stats (PRESERVED)
         btsp_stats = self.btsp_mechanism.get_stats()
+
+        # NEW: Add temporal statistics
+        temporal_stats = self.get_temporal_statistics()
 
         return {
             'node_id': self.node_id,
             'specialization': self.specialization,
             'timestamp': current_time,
             'basic_stats': self.stats,
+            'temporal_stats': temporal_stats,  # NEW
             'dynamics_stats': dynamics_stats,
             'btsp_stats': btsp_stats,
             'capacity_info': {
@@ -549,7 +1005,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
         }
 
     def save_checkpoint(self, filepath: str):
-        """Save complete node state"""
+        """Save complete node state (ENHANCED with temporal data)"""
         checkpoint = {
             'node_id': self.node_id,
             'dimension': self.dimension,
@@ -567,40 +1023,57 @@ class EnhancedDistributedMemoryNode(nn.Module):
             'faiss_id_to_trace_id': self.faiss_id_to_trace_id,
             'next_faiss_id': self.next_faiss_id
         }
+        
+        # NEW: Add temporal state
+        if self.temporal_enabled:
+            checkpoint['temporal_stats'] = self.temporal_stats
+            checkpoint['temporal_context_cache'] = self.temporal_context_cache
+            checkpoint['last_temporal_update'] = self.last_temporal_update
+            checkpoint['temporal_injection_history'] = list(self.temporal_injection_history) if self.temporal_injection_history else []
 
         torch.save(checkpoint, filepath)
         logger.info(f"DMN {self.node_id}: Saved checkpoint to {filepath}")
 
     def load_checkpoint(self, filepath: str):
-        """Load complete node state"""
+        """Load complete node state (ENHANCED with temporal data)"""
         checkpoint = torch.load(filepath, map_location=self.device)
 
-        # Restore parameters
+        # Restore parameters (PRESERVED)
         self.fast_weights.data = checkpoint['fast_weights'].to(self.device)
         self.slow_weights.data = checkpoint['slow_weights'].to(self.device)
         self.weight_usage = checkpoint['weight_usage'].to(self.device)
         self.last_weight_update = checkpoint['last_weight_update'].to(self.device)
 
-        # Restore memory traces
+        # Restore memory traces (PRESERVED)
         self.memory_traces = []
         for trace_data in checkpoint['memory_traces']:
             trace = MemoryTrace.from_dict(trace_data, self.device)
             self.memory_traces.append(trace)
 
-        # Restore other state
+        # Restore other state (PRESERVED)
         self.trace_index = checkpoint['trace_index']
         self.specialization_counts = defaultdict(int, checkpoint['specialization_counts'])
         self.stats = checkpoint['stats']
         self.faiss_id_to_trace_id = checkpoint['faiss_id_to_trace_id']
         self.next_faiss_id = checkpoint['next_faiss_id']
 
-        # Rebuild FAISS index
+        # NEW: Restore temporal state
+        if self.temporal_enabled and 'temporal_stats' in checkpoint:
+            self.temporal_stats = checkpoint['temporal_stats']
+            self.temporal_context_cache = checkpoint.get('temporal_context_cache', {})
+            self.last_temporal_update = checkpoint.get('last_temporal_update', time.time())
+            
+            temporal_injection_data = checkpoint.get('temporal_injection_history', [])
+            if self.temporal_injection_history is not None:
+                self.temporal_injection_history.extend(temporal_injection_data)
+
+        # Rebuild FAISS index (PRESERVED)
         self._rebuild_faiss_index()
 
         logger.info(f"DMN {self.node_id}: Loaded checkpoint from {filepath}")
 
     def _rebuild_faiss_index(self):
-        """Rebuild FAISS index from memory traces"""
+        """Rebuild FAISS index from memory traces (PRESERVED)"""
         # Clear existing index
         self.index.reset()
 
@@ -634,7 +1107,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
             logger.info(f"DMN {self.node_id}: Rebuilt FAISS index with {len(vectors)} traces")
 
     def cleanup(self):
-        """Cleanup resources"""
+        """Cleanup resources (PRESERVED)"""
         if hasattr(self, 'async_executor'):
             self.async_executor.shutdown(wait=True)
 
