@@ -1,0 +1,103 @@
+# config/temporal_config.yaml
+
+temporal_dynamics:
+  enabled: true
+  
+  # Global settings
+  time_step: 0.001  # 1ms
+  max_simulation_time: 3600.0  # 1 hour
+  
+  # Timescale process configurations
+  processes:
+    fast_synaptic:
+      base_duration: 0.005  # 5ms
+      min_duration: 0.001   # 1ms
+      max_duration: 0.02    # 20ms
+      adaptation_rate: 0.2
+      stability_threshold: 0.02
+      enabled: true
+      
+    calcium_plasticity:
+      base_duration: 0.5    # 500ms
+      min_duration: 0.1     # 100ms
+      max_duration: 2.0     # 2s
+      adaptation_rate: 0.15
+      stability_threshold: 0.1
+      calcium_decay_rate: 0.1
+      ltp_threshold: 0.8
+      ltd_threshold: 0.3
+      enabled: true
+      
+    protein_synthesis:
+      base_duration: 60.0   # 1 minute
+      min_duration: 30.0    # 30s
+      max_duration: 300.0   # 5 minutes
+      adaptation_rate: 0.1
+      stability_threshold: 0.5
+      consolidation_rate: 0.01
+      consolidation_threshold: 0.7
+      synthesis_capacity: 10
+      enabled: true
+      
+    homeostatic_scaling:
+      base_duration: 3600.0  # 1 hour
+      min_duration: 1800.0   # 30 minutes
+      max_duration: 7200.0   # 2 hours
+      adaptation_rate: 0.05
+      stability_threshold: 2.0
+      target_activity: 0.5
+      enabled: false  # TODO: Implement
+      
+    systems_consolidation:
+      base_duration: 86400.0  # 24 hours
+      min_duration: 43200.0   # 12 hours
+      max_duration: 172800.0  # 48 hours
+      adaptation_rate: 0.02
+      stability_threshold: 10.0
+      consolidation_rate: 0.001
+      enabled: false  # TODO: Implement
+
+  # Integration settings
+  integration:
+    dmn_integration: true
+    btsp_integration: true
+    llm_integration: true
+    memory_gateway_integration: true
+    
+    # Injection rates
+    dmn_injection_rate: 0.1
+    btsp_modulation_strength: 0.5
+    llm_attention_modulation: true
+    llm_memory_formation_modulation: true
+    
+  # Performance monitoring
+  monitoring:
+    enabled: true
+    update_interval: 1.0  # seconds
+    history_length: 1000
+    health_check_interval: 10.0
+    
+  # Hardware integration (future)
+  hardware:
+    enabled: false
+    device_types: []
+    energy_monitoring: false
+
+# DMN temporal configuration
+dmn:
+  temporal_enabled: true
+  temporal_injection_rate: 0.1
+  cleanup_interval: 3600.0  # 1 hour
+
+# BTSP temporal configuration  
+btsp:
+  temporal_modulation: true
+  modulation_strength: 0.5
+  eligibility_decay: 0.95
+  temporal_window: 10.0  # seconds
+
+# LLM integration temporal configuration
+llm_integration:
+  attention_modulation: true
+  memory_formation_modulation: true
+  token_salience_threshold: 0.7
