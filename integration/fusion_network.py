@@ -401,7 +401,14 @@ class MultiHeadMemoryAttention(nn.Module):
         attended_output = attended_output.squeeze(1)  # [batch_size, model_dim]
         output = self.layer_norm(query + self.dropout(attended_output))
         
-        return output, attention_weights.squeeze(1)  # Remove query sequence dim
+        # Ensure attention weights are properly normalized
+        attention_weights_squeezed = attention_weights.squeeze(1)
+        if attention_weights_squeezed.dim() > 1:
+            attention_weights_normalized = F.softmax(attention_weights_squeezed, dim=-1)
+        else:
+            attention_weights_normalized = attention_weights_squeezed
+        
+        return output, attention_weights_normalized
 
 
 class GatedMemoryFusion(nn.Module):
