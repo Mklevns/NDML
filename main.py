@@ -24,6 +24,24 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# DEVICE UTILITY FUNCTIONS - ADD THESE AFTER IMPORTS, BEFORE OTHER FUNCTIONS
+# ============================================================================
+
+def ensure_tensor_device(tensor: torch.Tensor, target_device: str) -> torch.Tensor:
+    """Utility function to ensure tensor is on target device."""
+    if tensor.device.type != target_device:
+        return tensor.to(target_device)
+    return tensor
+
+def batch_ensure_device(tensors: List[torch.Tensor], target_device: str) -> List[torch.Tensor]:
+    """Ensure all tensors in a list are on the same target device."""
+    return [ensure_tensor_device(tensor, target_device) for tensor in tensors]
+
+# ============================================================================
+# EXISTING FUNCTIONS CONTINUE BELOW
+# ========================================================================
+
 # Import NDML components with fallbacks for missing modules
 def import_with_fallback():
     """Import NDML components with fallbacks for missing modules."""
@@ -572,11 +590,10 @@ class NDMLSystemManager:
         try:
             results = {'success': True, 'details': {}, 'errors': []}
             
-            # Get the configured device
             device = self.config['system']['device']
             logger.debug(f"Basic memory test using device: {device}")
             
-            # Test memory trace creation
+            # DEVICE FIX: Create tensors on the configured device
             MemoryTrace = self.imported_components['memory_trace']
             test_content = torch.randn(self.config['system']['dimension'], device=device)
             test_context = {'domain': 'test', 'task_type': 'storage_test'}
@@ -603,8 +620,8 @@ class NDMLSystemManager:
                 results['success'] = False
                 results['errors'].append("Failed to store memory in gateway")
             
-            # Test basic retrieval - Create query on same device
-            query_content = test_content + torch.randn_like(test_content) * 0.1  # Similar but not identical
+            # DEVICE FIX: Create query on same device and make it similar but not identical
+            query_content = test_content + torch.randn_like(test_content) * 0.1
             retrieved = await self.components['memory_gateway'].retrieve_memories_async(
                 query=query_content,
                 context=test_context,
@@ -633,12 +650,12 @@ class NDMLSystemManager:
         try:
             results = {'success': True, 'details': {}, 'errors': []}
             
-            # Use the configured device
             device = self.config['system']['device']
             
             # Store test memories with different patterns
             test_memories = []
             for i in range(50):
+                # DEVICE FIX: Create content on configured device
                 content = torch.randn(self.config['system']['dimension'], device=device)
                 context = {
                     'domain': f'domain_{i % 5}',
@@ -655,8 +672,11 @@ class NDMLSystemManager:
             
             results['details']['test_memories_stored'] = len(test_memories)
             
-            # Test similarity-based retrieval
-            query_content = test_memories[0][0] + torch.randn(self.config['system']['dimension']) * 0.1
+            # DEVICE FIX: Create query on same device
+            query_content = test_memories[0][0] + torch.randn(
+                self.config['system']['dimension'], device=device
+            ) * 0.1
+            
             retrieved = await self.components['memory_gateway'].retrieve_memories_async(
                 query=query_content,
                 context={},
@@ -668,8 +688,10 @@ class NDMLSystemManager:
             
             # Test context-filtered retrieval
             context_filter = {'domain': 'domain_0'}
+            # DEVICE FIX: Create new query on correct device
+            filtered_query = torch.randn(self.config['system']['dimension'], device=device)
             filtered_retrieved = await self.components['memory_gateway'].retrieve_memories_async(
-                query=torch.randn(self.config['system']['dimension']),
+                query=filtered_query,
                 context=context_filter,
                 k=10
             )
@@ -681,10 +703,16 @@ class NDMLSystemManager:
             if len(retrieved) > 1:
                 similarities = []
                 for i in range(len(retrieved) - 1):
+                    # DEVICE FIX: Ensure both tensors are on same device for comparison
+                    content1 = retrieved[i][0].content
+                    content2 = retrieved[i+1][0].content
+                    
+                    # Move to same device if needed
+                    if content1.device != content2.device:
+                        content2 = content2.to(content1.device)
+                    
                     sim = torch.cosine_similarity(
-                        retrieved[i][0].content,
-                        retrieved[i+1][0].content,
-                        dim=0
+                        content1, content2, dim=0
                     ).item()
                     similarities.append(sim)
                 
@@ -695,6 +723,7 @@ class NDMLSystemManager:
             return results
         
         except Exception as e:
+            logger.error(f"Memory retrieval test error: {e}")
             return {
                 'success': False,
                 'details': {},
