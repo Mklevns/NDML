@@ -40,6 +40,19 @@ def batch_ensure_device(tensors: List[torch.Tensor], target_device: str) -> List
     """Ensure all tensors in a list are on the same target device."""
     return [ensure_tensor_device(tensor, target_device) for tensor in tensors]
 
+def get_faiss_device() -> str:
+    """Always return CPU for FAISS operations - FAISS requires CPU tensors."""
+    return 'cpu'
+
+def normalize_for_faiss(tensor: torch.Tensor) -> np.ndarray:
+    """Normalize tensor consistently for FAISS indexing."""
+    # Always work on CPU for FAISS
+    tensor_cpu = tensor.detach().cpu()
+    # Normalize along the feature dimension (last dimension)
+    normalized = F.normalize(tensor_cpu, dim=-1)
+    # Convert to numpy with correct dtype
+    return normalized.numpy().astype('float32')
+
 # ============================================================================
 # EXISTING FUNCTIONS CONTINUE BELOW
 # ========================================================================
@@ -315,13 +328,13 @@ class NDMLSystemManager:
                 'systems_duration': 86400.0,
             },
             'btsp': {
-                'calcium_threshold': 0.3,  # Lower threshold - was 0.7
+                'calcium_threshold': 0.5,  # Balanced threshold
                 'decay_rate': 0.95,
                 'novelty_weight': 0.4,
                 'importance_weight': 0.3,
                 'error_weight': 0.3,
                 'learning_rate': 0.1,
-                'dimension': 512  # Add this to match system dimension
+                'dimension': 512  # Match system dimension
             },
             'fusion': {
                 'num_attention_heads': 8,
@@ -342,7 +355,7 @@ class NDMLSystemManager:
             },
             'retrieval': {
                 'default_k': 10,
-                'similarity_threshold': 0.3,  # LOWERED from 0.5 to 0.3
+                'similarity_threshold': 0.1,  # Very permissive for debugging
                 'diversity_weight': 0.2,
                 'context_weight': 0.3,
             },
@@ -365,7 +378,7 @@ class NDMLSystemManager:
                 'index_type': 'HNSW',
                 'hnsw_m': 16,
                 'hnsw_ef_construction': 200,
-                'similarity_threshold': 0.3,  # LOWERED from 0.5 to 0.3
+                'similarity_threshold': 0.1,  # Very permissive for debugging
             },  # FIXED: Added missing closing brace
             'dynamics': {
                 'calcium_decay_ms': 200,
@@ -653,11 +666,23 @@ class NDMLSystemManager:
             
             logger.info(f"🔍 DEBUG: Query content shape: {query_content.shape}, device: {query_content.device}")
             
-            retrieved = await self.components['memory_gateway'].retrieve_memories_async(
-                query=query_content,
-                context=test_context,
-                k=5
-            )
+            # Set debug logging level temporarily
+            gateway_logger = logging.getLogger('integration.memory_gateway')
+            dmn_logger = logging.getLogger('core.dmn')
+            old_level = gateway_logger.level
+            gateway_logger.setLevel(logging.DEBUG)
+            dmn_logger.setLevel(logging.DEBUG)
+            
+            try:
+                retrieved = await self.components['memory_gateway'].retrieve_memories_async(
+                    query=query_content,
+                    context=test_context,
+                    k=5
+                )
+            finally:
+                # Restore logging level
+                gateway_logger.setLevel(old_level)
+                dmn_logger.setLevel(old_level)
             
             logger.info(f"🔍 DEBUG: Retrieved {len(retrieved)} memories")
             
@@ -693,6 +718,33 @@ class NDMLSystemManager:
                 results['success'] = False
                 results['errors'].append("Failed to retrieve stored memory")
                 logger.error("❌ Retrieval failed")
+                
+                # DEBUGGING: Check what went wrong
+                logger.error("🔍 DEBUGGING retrieval failure:")
+                logger.error(f"  - Gateway has memories: {self.components['memory_gateway'].has_memories()}")
+                logger.error(f"  - Query similarity threshold: {similarity_threshold}")
+                logger.error(f"  - Expected similarity: {expected_similarity}")
+                
+                # Check each cluster
+                for i, cluster in enumerate(self.components['memory_gateway'].clusters):
+                    cluster_memory_count = cluster.get_memory_count()
+                    logger.error(f"  - Cluster {i} memory count: {cluster_memory_count}")
+                    
+                    if cluster_memory_count > 0:
+                        # Try a very permissive search on this cluster directly
+                        try:
+                            debug_results = await cluster.retrieve_memories_async(
+                                query=query_content,
+                                context=test_context,
+                                k=5,
+                                similarity_threshold=0.0  # Accept anything
+                            )
+                            logger.error(f"  - Cluster {i} debug search results: {len(debug_results)}")
+                            if debug_results:
+                                for j, (mem, sim) in enumerate(debug_results[:3]):
+                                    logger.error(f"    Result {j}: similarity={sim:.6f}")
+                        except Exception as e:
+                            logger.error(f"  - Cluster {i} debug search failed: {e}")
             else:
                 logger.info("✅ Retrieval successful")
             
