@@ -10,7 +10,7 @@ from enum import Enum
 
 # Define enums FIRST before they're used
 class ConsolidationState(Enum):
-    """Memory consolidation states"""
+    
     INITIAL = "initial"
     CONSOLIDATING = "consolidating"
     CONSOLIDATED = "consolidated"
@@ -19,14 +19,20 @@ class ConsolidationState(Enum):
 
 @dataclass
 class TemporalMetadata:
-    """Temporal metadata for memory traces"""
+    
     consolidation_cycles: int = 0
     last_consolidation: float = 0.0
     temporal_weight: float = 1.0
     phase_coherence: float = 0.0
-    consolidation_state: ConsolidationState = ConsolidationState.INITIAL
+    
+    # Add these new fields
+    consolidation_state: ConsolidationState = None  # Will be set in __post_init__
     consolidation_strength: float = 0.0
     temporal_coherence: float = 1.0
+    
+    def __post_init__(self):
+        if self.consolidation_state is None:
+            self.consolidation_state = ConsolidationState.INITIAL
 
 
 @dataclass
@@ -67,10 +73,6 @@ class MemoryTrace:
     temporal_metadata: Optional[TemporalMetadata] = None
 
     def __post_init__(self):
-        # Ensure content is detached and moved to CPU for consistent storage
-        if isinstance(self.content, torch.Tensor):
-            self.content = self.content.detach().cpu()
-        
         if self.last_access == 0.0:
             self.last_access = self.timestamp
         if self.current_salience is None:
@@ -78,10 +80,11 @@ class MemoryTrace:
         if not self.trace_id:
             self.trace_id = self._generate_trace_id()
         
-        # Initialize temporal metadata if not present
-        if self.temporal_metadata is None:
-            self.temporal_metadata = TemporalMetadata()
-            
+        # Initialize temporal metadata
+        self.temporal_metadata = TemporalMetadata()
+        self.temporal_metadata.consolidation_state = ConsolidationState.INITIAL
+        self.temporal_metadata.consolidation_strength = 0.0
+        self.temporal_metadata.temporal_coherence = 1.0
     def get_content_on_device(self, device: str) -> torch.Tensor:
         """Get content tensor on specified device."""
         return self.content.to(device)
@@ -281,6 +284,78 @@ class MemoryTrace:
             }
         
         return result
+    
+    def update_temporal_state(self, temporal_context: Dict[str, Any]):
+    
+        if not hasattr(self, 'temporal_metadata'):
+            self.temporal_metadata = TemporalMetadata()
+        
+        # Update temporal coherence from context
+        if 'temporal_coherence' in temporal_context:
+            self.temporal_metadata.temporal_coherence = temporal_context['temporal_coherence']
+        
+        # Update phase coherence
+        if 'phase_coherence' in temporal_context:
+            self.temporal_metadata.phase_coherence = temporal_context['phase_coherence']
+
+    def get_temporal_age_category(self) -> str:
+        """Get temporal age category based on trace age"""
+        age = time.time() - self.timestamp
+        
+        if age < 0.005:  # 5ms
+            return "fast_synaptic"
+        elif age < 0.5:  # 500ms
+            return "calcium_plasticity"
+        elif age < 60:  # 1 minute
+            return "protein_synthesis"
+        elif age < 3600:  # 1 hour
+            return "homeostatic_scaling"
+        else:
+            return "systems_consolidation"
+
+    def should_consolidate(self, threshold: float = 0.7) -> bool:
+        
+        if not hasattr(self, 'temporal_metadata'):
+            return False
+            
+        # Check consolidation readiness based on multiple factors
+        consolidation_strength = getattr(self.temporal_metadata, 'consolidation_strength', 0.0)
+        if consolidation_strength >= threshold:
+            return True
+            
+        # Check based on age and salience
+        age = time.time() - self.timestamp
+        if age > 60 and self.current_salience >= threshold:
+            return True
+            
+        return False
+
+    def get_temporal_priority(self) -> float:
+        
+        base_priority = self.current_salience
+        
+        # Age category weight
+        age_category = self.get_temporal_age_category()
+        age_weights = {
+            "fast_synaptic": 1.0,
+            "calcium_plasticity": 0.9,
+            "protein_synthesis": 0.8,
+            "homeostatic_scaling": 0.7,
+            "systems_consolidation": 0.6
+        }
+        age_weight = age_weights.get(age_category, 0.5)
+        
+        # Consolidation state weight
+        if hasattr(self, 'temporal_metadata'):
+            consolidation_strength = getattr(self.temporal_metadata, 'consolidation_strength', 0.0)
+            consolidation_weight = 1.0 + consolidation_strength * 0.5
+        else:
+            consolidation_weight = 1.0
+        
+        # Access pattern weight
+        access_weight = np.log1p(self.access_count) / 10.0
+        
+        return base_priority * age_weight * consolidation_weight + access_weight
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any], device: str = "cpu") -> 'MemoryTrace':

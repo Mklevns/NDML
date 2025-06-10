@@ -1201,6 +1201,116 @@ class MultiTimescaleDynamicsEngine:
         """Integrate with memory gateway."""
         self.memory_gateway_bridge = memory_gateway
         logging.info("Integrated with memory gateway")
+        
+    
+    async def process_update_async(self, content: torch.Tensor, salience: float, calcium_level: float) -> bool:
+        
+        try:
+            # Inject update event into fast synaptic process
+            if salience > 0.5:  # Only process significant updates
+                await self.inject_event(
+                    "memory_update",
+                    "fast_synaptic",
+                    {
+                        "content": content.detach().cpu().numpy().tolist() if hasattr(content, 'numpy') else content,
+                        "salience": salience,
+                        "calcium_level": calcium_level,
+                        "timestamp": self.current_time
+                    }
+                )
+            
+            # Also inject into calcium plasticity if calcium level is high
+            if calcium_level > 0.7:
+                await self.inject_event(
+                    "high_calcium_update",
+                    "calcium_plasticity",
+                    {
+                        "calcium_level": calcium_level,
+                        "salience": salience,
+                        "timestamp": self.current_time
+                    }
+                )
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error processing update in dynamics engine: {e}")
+            return False
+        
+    async def process_retrieval_async(self, query: torch.Tensor, retrieved_traces: List[Any]) -> bool:
+    
+        try:
+            if not retrieved_traces:
+                return True
+                
+            # Calculate retrieval pattern statistics
+            num_traces = len(retrieved_traces)
+            avg_salience = np.mean([trace.salience for trace in retrieved_traces])
+            
+            # Inject retrieval event
+            await self.inject_event(
+                "retrieval_pattern",
+                "fast_synaptic",
+                {
+                    "query_norm": float(torch.norm(query)) if hasattr(query, 'norm') else 1.0,
+                    "num_retrieved": num_traces,
+                    "average_salience": avg_salience,
+                    "timestamp": self.current_time
+                }
+            )
+            
+            # Process spike pairs if multiple traces retrieved
+            if num_traces > 1:
+                for i in range(min(5, num_traces-1)):  # Process up to 5 pairs
+                    await self.inject_event(
+                        "spike_pair",
+                        "calcium_plasticity",
+                        {
+                            "pre_neuron": i,
+                            "post_neuron": i+1,
+                            "timing_difference": 0.01 * (i+1),  # Simulated timing
+                            "timestamp": self.current_time
+                        }
+                    )
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error processing retrieval in dynamics engine: {e}")
+            return False
+
+    async def initiate_consolidation(self, trace: Any, current_time: float) -> bool:
+        
+        try:
+            await self.inject_event(
+                "consolidation_request",
+                "protein_synthesis",
+                {
+                    "memory_data": {
+                        "trace_id": getattr(trace, 'trace_id', f'trace_{current_time}'),
+                        "salience": getattr(trace, 'salience', 0.5),
+                        "content": getattr(trace, 'content', None),
+                        "consolidation_strength": 0.0
+                    },
+                    "priority": 1,
+                    "timestamp": current_time
+                }
+            )
+            return True
+        except Exception as e:
+            logging.error(f"Error initiating consolidation: {e}")
+            return False
+
+    async def update_consolidation_progress(self, trace: Any, current_time: float, progress: float) -> bool:
+        
+        try:
+            # This is a placeholder - actual implementation would update internal state
+            return True
+        except Exception as e:
+            logging.error(f"Error updating consolidation progress: {e}")
+            return False
+        
+        
 
 class TemporalPerformanceMonitor:
     """Monitors performance of the temporal dynamics system."""
