@@ -1,14 +1,17 @@
 # integration/memory_gateway.py
+# integration/memory_gateway.py
 import asyncio
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any, Set
 import logging
 import time
 from collections import defaultdict
 
-from ..core.dmn import EnhancedDistributedMemoryNode
-from ..consensus.neuromorphic import NeuromorphicConsensusLayer
+# Import from local files
+from core.dmn import EnhancedDistributedMemoryNode
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +37,11 @@ class MemoryGateway:
         # Initialize memory clusters
         self.clusters = self._init_clusters()
 
-        # Initialize consensus layer if enabled
+        # Initialize consensus layer if enabled (stub for now)
         self.consensus_layer = None
         if enable_consensus:
-            self.consensus_layer = NeuromorphicConsensusLayer(
-                node_id="gateway_consensus",
-                dimension=dimension,
-                **self.config.get('consensus', {})
-            )
+            # Create a simple consensus stub
+            self.consensus_layer = self._create_consensus_stub()
 
         # Routing and load balancing
         self.cluster_router = self._init_cluster_router()
@@ -59,32 +59,29 @@ class MemoryGateway:
 
         logger.info(f"MemoryGateway initialized: {num_clusters} clusters, {nodes_per_cluster} nodes/cluster")
 
+    def _create_consensus_stub(self):
+        """Create a stub consensus layer for testing."""
+        class ConsensusStub:
+            def __init__(self):
+                pass
+            
+            async def propose_memory_update(self, trace_id, content_vector, metadata):
+                # Always return success for testing
+                return True
+            
+            def get_stats(self):
+                return {"stub_consensus": True}
+        
+        return ConsensusStub()
+
     def _default_config(self) -> Dict[str, Any]:
-        """Default configuration for memory gateway"""
         return {
-            'routing': {
-                'strategy': 'learned',  # 'learned', 'round_robin', 'load_based'
-                'similarity_threshold': 0.3,
-                'max_clusters_per_query': 2
-            },
-            'retrieval': {
-                'default_k': 10,
-                'max_k': 50,
-                'similarity_threshold': 0.5,
-                'diversity_weight': 0.2
-            },
-            'consensus': {
-                'bloom_capacity': 100000,
-                'bloom_error_rate': 0.01,
-                'vo2_oscillators': 64
-            },
-            'load_balancing': {
-                'strategy': 'adaptive',  # 'adaptive', 'round_robin', 'least_loaded'
-                'rebalance_interval': 300  # 5 minutes
-            }
+            "routing": {"strategy": "round_robin"},
+            "retrieval": {"default_k": 10},
+            "btsp": {"calcium_threshold": 0.7, "decay_rate": 0.95, "novelty_weight": 0.4, "importance_weight": 0.3, "error_weight": 0.3, "learning_rate": 0.1}
         }
 
-    def _init_clusters(self) -> List[MemoryCluster]:
+    def _init_clusters(self) -> List['MemoryCluster']:
         """Initialize memory clusters with specialized nodes"""
         clusters = []
 
@@ -103,7 +100,7 @@ class MemoryGateway:
 
         return clusters
 
-    def _init_cluster_router(self) -> ClusterRouter:
+    def _init_cluster_router(self) -> 'ClusterRouter':
         """Initialize routing system for directing queries to clusters"""
         return ClusterRouter(
             input_dimension=self.dimension,
@@ -367,29 +364,25 @@ class MemoryGateway:
 
     async def periodic_maintenance(self):
         """Perform periodic maintenance tasks"""
-        while True:
-            try:
-                # Trigger consolidation in all clusters
-                consolidation_tasks = []
-                for cluster in self.clusters:
-                    consolidation_tasks.append(cluster.consolidate_memories_async())
+        try:
+            # Trigger consolidation in all clusters
+            consolidation_tasks = []
+            for cluster in self.clusters:
+                consolidation_tasks.append(cluster.consolidate_memories_async())
 
-                await asyncio.gather(*consolidation_tasks)
+            await asyncio.gather(*consolidation_tasks)
 
-                # Rebalance load if needed
-                await self.load_balancer.rebalance_if_needed()
+            # Rebalance load if needed
+            await self.load_balancer.rebalance_if_needed()
 
-                # Update routing model if using learned routing
-                if self.config['routing']['strategy'] == 'learned':
-                    await self.cluster_router.update_routing_model()
+            # Update routing model if using learned routing
+            if self.config['routing']['strategy'] == 'learned':
+                await self.cluster_router.update_routing_model()
 
-                logger.info("MemoryGateway: Completed periodic maintenance")
+            logger.info("MemoryGateway: Completed periodic maintenance")
 
-            except Exception as e:
-                logger.error(f"MemoryGateway: Maintenance error: {e}")
-
-            # Wait for next maintenance cycle (1 hour)
-            await asyncio.sleep(3600)
+        except Exception as e:
+            logger.error(f"MemoryGateway: Maintenance error: {e}")
 
 
 # Supporting classes for the gateway
