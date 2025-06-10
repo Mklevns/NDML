@@ -2,10 +2,11 @@
 
 import asyncio
 import numpy as np
+import time
 from typing import Dict, Any, List, Optional, Tuple
 import logging
-from ..core.dynamics import MultiTimescaleDynamicsEngine, TemporalState
-from ..core.memory_trace import MemoryTrace
+from core.dynamics import MultiTimescaleDynamicsEngine, TemporalState
+from core.memory_trace import MemoryTrace
 
 class TemporalLLMBridge:
     """Bridge between temporal dynamics and LLM integration."""

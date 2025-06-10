@@ -223,12 +223,11 @@ class NDMLIntegratedLLM(nn.Module):
         else:
             raise ValueError(f"Unknown adapter type: {adapter_type}")
 
-    def forward(self,
-                input_ids: torch.Tensor,
-                attention_mask: Optional[torch.Tensor] = None,
-                context: Optional[Dict[str, Any]] = None,
-                update_memory: bool = True) -> Dict[str, torch.Tensor]:
-        """Forward pass with memory integration"""
+    async def forward(self,
+                  input_ids: torch.Tensor,
+                  attention_mask: Optional[torch.Tensor] = None,
+                  context: Optional[Dict[str, Any]] = None,
+                  update_memory: bool = True) -> Dict[str, torch.Tensor]:
 
         if attention_mask is None:
             attention_mask = torch.ones_like(input_ids)
