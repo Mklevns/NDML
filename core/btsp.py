@@ -250,26 +250,27 @@ class BTSPUpdateMechanism:
             return 0.5
 
     async def _compute_importance(self, 
-                                  input_state: torch.Tensor,
-                                  context: Dict[str, Any],
-                                  user_feedback: Optional[Dict[str, Any]] = None) -> float:
-        """Compute importance score based on context and feedback."""
+                              input_state: torch.Tensor,
+                              context: Dict[str, Any],
+                              user_feedback: Optional[Dict[str, Any]] = None) -> float:
         try:
-            # Extract context features
-            context_features = self._extract_context_features(context, user_feedback)
             
-            # Combine input state with context
+            context_features = self._extract_context_features(
+                context, user_feedback, device=input_state.device
+            )
+            
+            
             input_normalized = F.normalize(input_state, dim=-1)
             combined_input = torch.cat([
                 input_normalized.unsqueeze(0),
                 context_features.unsqueeze(0)
             ], dim=1)
             
-            # Compute importance using network
+            
             with torch.no_grad():
                 importance = self.importance_network(combined_input).item()
             
-            # Apply user feedback modulation
+            
             if user_feedback:
                 feedback_multiplier = self._get_feedback_multiplier(user_feedback)
                 importance *= feedback_multiplier
@@ -281,13 +282,13 @@ class BTSPUpdateMechanism:
             return 0.5
 
     async def _compute_error(self, 
-                             input_state: torch.Tensor,
-                             existing_traces: List[Any],
-                             context: Dict[str, Any]) -> float:
-        """Compute error score based on prediction accuracy."""
+                         input_state: torch.Tensor,
+                         existing_traces: List[Any],
+                         context: Dict[str, Any]) -> float:
+    
         try:
             if not existing_traces:
-                return 0.5  # Moderate error if no reference
+                return 0.5
             
             input_normalized = F.normalize(input_state, dim=-1)
             
@@ -295,9 +296,11 @@ class BTSPUpdateMechanism:
             best_match = None
             best_similarity = -1.0
             
-            for trace in existing_traces[-20:]:  # Check recent traces
+            for trace in existing_traces[-20:]:
                 if hasattr(trace, 'content'):
-                    trace_content = F.normalize(trace.content, dim=-1)
+                    # Ensure trace content is on same device as input
+                    trace_content = trace.content.to(input_state.device)
+                    trace_content = F.normalize(trace_content, dim=-1)
                     similarity = F.cosine_similarity(
                         input_normalized.unsqueeze(0),
                         trace_content.unsqueeze(0)
@@ -310,8 +313,9 @@ class BTSPUpdateMechanism:
             if best_match is None:
                 return 0.5
             
-            # Compute error using network
-            reference_content = F.normalize(best_match.content, dim=-1)
+            # Compute error using network - ensure same device
+            reference_content = best_match.content.to(input_state.device)
+            reference_content = F.normalize(reference_content, dim=-1)
             combined_input = torch.cat([
                 input_normalized.unsqueeze(0),
                 reference_content.unsqueeze(0)
@@ -332,10 +336,11 @@ class BTSPUpdateMechanism:
             return 0.5
 
     def _extract_context_features(self, 
-                                  context: Dict[str, Any],
-                                  user_feedback: Optional[Dict[str, Any]] = None) -> torch.Tensor:
-        """Extract numerical features from context and feedback."""
-        features = torch.zeros(64)  # Fixed size feature vector
+                              context: Dict[str, Any],
+                              user_feedback: Optional[Dict[str, Any]] = None,
+                              device: str = 'cpu') -> torch.Tensor:
+    
+        features = torch.zeros(64, device=device)  # Create on specified device
         
         try:
             # Task type encoding
@@ -352,7 +357,6 @@ class BTSPUpdateMechanism:
             
             # Temporal features
             if 'timestamp' in context:
-                # Time of day (normalized)
                 hour = (context['timestamp'] % 86400) / 86400
                 features[8] = hour
             

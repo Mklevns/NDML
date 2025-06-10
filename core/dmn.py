@@ -478,44 +478,99 @@ class EnhancedDistributedMemoryNode(nn.Module):
                                  salience: float,
                                  user_feedback: Optional[Dict[str, Any]] = None) -> bool:
     
-
+    
         current_time = time.time()
-
-        # Ensure content is on CPU for consistent storage
+        
+        # DEVICE FIX: Store content on CPU for FAISS compatibility but keep original device reference
+        original_device = content.device
         content_cpu = content.detach().cpu()
 
-        # Create memory trace (PRESERVED)
+        # Create memory trace with CPU content
         trace = MemoryTrace(
-            content=content_cpu,  # Store on CPU
+            content=content_cpu,
             context=context.copy(),
             timestamp=current_time,
             salience=salience,
             creation_node=self.node_id
         )
 
-        # NEW: Initialize temporal metadata
         if self.temporal_enabled and self.temporal_context_cache:
             trace.update_temporal_state(self.temporal_context_cache)
 
-        # Compute update decision using BTSP mechanism (PRESERVED) - DEVICE CONSISTENCY
+        # DEVICE FIX: Use content on the device expected by BTSP
         try:
-            # Pass content on the same device as BTSP expects
-            content_for_btsp = content.to(self.device)
+            # For BTSP, we need the content on the processing device (usually GPU)
+            content_for_btsp = content.to(self.device) if self.device != 'cpu' else content_cpu
             update_decision = await self.btsp_mechanism.should_update_async(
                 input_state=content_for_btsp,
-                existing_traces=self.memory_traces[-50:],  # Check recent traces
+                existing_traces=self.memory_traces[-50:],
                 context=context,
                 user_feedback=user_feedback
             )
         except Exception as e:
             logger.error(f"DMN {self.node_id}: BTSP evaluation failed: {e}")
-            # Create a simple fallback decision
             class SimpleDecision:
                 def __init__(self):
                     self.should_update = True
                     self.calcium_level = 0.8
                     self.learning_rate = 0.1
             update_decision = SimpleDecision()
+
+        if not update_decision.should_update:
+            logger.debug(f"DMN {self.node_id}: Update rejected for trace {trace.trace_id}")
+            return False
+
+        if len(self.memory_traces) >= self.capacity:
+            await self._intelligent_eviction_async()
+
+        with self.lock:
+            self.memory_traces.append(trace)
+            self.trace_index[trace.trace_id] = len(self.memory_traces) - 1
+            specialization = context.get('domain', 'general')
+            self.specialization_counts[specialization] += 1
+
+        # DEVICE FIX: Add to FAISS using CPU content
+        await self._add_to_index_async(trace)
+
+        # DEVICE FIX: Update dynamics with CPU content
+        try:
+            await self.dynamics_engine.process_update_async(
+                content_cpu, salience, update_decision.calcium_level
+            )
+        except Exception as e:
+            logger.debug(f"DMN {self.node_id}: Dynamics engine update failed: {e}")
+
+        # DEVICE FIX: Update fast weights with device content
+        try:
+            content_for_weights = content.to(self.device) if self.device != 'cpu' else content_cpu
+            await self._update_fast_weights_async(
+                content_for_weights, salience, update_decision.learning_rate
+            )
+        except Exception as e:
+            logger.debug(f"DMN {self.node_id}: Fast weights update failed: {e}")
+
+        if self.temporal_enabled:
+            try:
+                await self._handle_temporal_events_on_storage(trace, update_decision)
+            except Exception as e:
+                logger.debug(f"DMN {self.node_id}: Temporal event injection failed: {e}")
+
+        # Update statistics
+        self.stats['total_traces'] += 1
+        self.stats['total_updates'] += 1
+        
+        if self.temporal_enabled:
+            age_category = trace.get_temporal_age_category()
+            self.temporal_stats['age_category_distribution'][age_category] += 1
+
+        logger.debug(f"DMN {self.node_id}: Added trace {trace.trace_id}")
+        return True
+        class SimpleDecision:
+                def __init__(self):
+                    self.should_update = True
+                    self.calcium_level = 0.8
+                    self.learning_rate = 0.1
+                    update_decision = SimpleDecision()
 
         if not update_decision.should_update:
             logger.debug(f"DMN {self.node_id}: Update rejected for trace {trace.trace_id}")
@@ -613,30 +668,26 @@ class EnhancedDistributedMemoryNode(nn.Module):
                                   similarity_threshold: float = None,
                                   temporal_context: Optional[Dict[str, Any]] = None) -> List[Tuple[MemoryTrace, float]]:
     
-
+    
         if self.index.ntotal == 0:
             return []
 
-        # Use configured threshold if not specified
         if similarity_threshold is None:
             similarity_threshold = self.config['indexing']['similarity_threshold']
 
-        # NEW: Use provided temporal context or cached context
         if temporal_context is None and self.temporal_enabled:
             temporal_context = self.temporal_context_cache
 
-        # Prepare normalized query - ENSURE DEVICE CONSISTENCY
-        query_cpu = query.detach().cpu()  # Always work with CPU for FAISS
+        # DEVICE FIX: Always work with CPU for FAISS, but keep track of original device
+        original_device = query.device
+        query_cpu = query.detach().cpu()
         query_normalized = F.normalize(query_cpu, dim=0)
-        query_np = query_normalized.detach().cpu().numpy().astype('float32').reshape(1, -1)
+        query_np = query_normalized.numpy().astype('float32').reshape(1, -1)
 
-        # Perform FAISS search (PRESERVED)
         try:
-            # Search more than k to allow for filtering
             search_k = min(k * 3, self.index.ntotal)
             similarities, faiss_ids = self.index.search(query_np, search_k)
 
-            # Process results (ENHANCED with temporal modulation)
             results = []
             current_time = time.time()
 
@@ -654,20 +705,16 @@ class EnhancedDistributedMemoryNode(nn.Module):
 
                 trace = self.memory_traces[trace_idx]
 
-                # Apply context filtering (PRESERVED)
                 if context_filter and not self._matches_context_filter(trace, context_filter):
                     continue
 
-                # NEW: Apply temporal modulation to similarity
+                # DEVICE FIX: Apply temporal modulation using CPU tensors
                 if self.temporal_enabled and temporal_context:
                     modulated_sim = self._apply_temporal_modulation(sim, trace, temporal_context)
                 else:
                     modulated_sim = sim
 
-                # Update access statistics (PRESERVED)
                 trace.update_access_stats(current_time, context_relevant=True)
-
-                # Record access pattern for dynamics (PRESERVED)
                 self.access_patterns[trace_id].append(current_time)
 
                 results.append((trace, float(modulated_sim)))
@@ -675,19 +722,16 @@ class EnhancedDistributedMemoryNode(nn.Module):
                 if len(results) >= k:
                     break
 
-            # Sort by modulated similarity
             results.sort(key=lambda x: x[1], reverse=True)
 
-            # Update dynamics engine with retrieval pattern (PRESERVED) - FIX DEVICE ISSUES
+            # DEVICE FIX: Pass CPU query to dynamics engine
             try:
                 await self.dynamics_engine.process_retrieval_async(
-                    query_cpu,  # Use CPU version for consistency
-                    [trace for trace, _ in results]
+                    query_cpu, [trace for trace, _ in results]
                 )
             except Exception as e:
                 logger.debug(f"DMN {self.node_id}: Dynamics engine retrieval processing failed: {e}")
 
-            # NEW: Inject temporal retrieval events
             if self.temporal_enabled and results:
                 try:
                     await self._handle_temporal_events_on_retrieval(query_cpu, results, temporal_context)
