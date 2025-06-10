@@ -1,4 +1,4 @@
-# core/btsp.py - Biological Tag-and-Store Plasticity Update Mechanism
+# core/btsp.py - Fixed version with proper device handling
 import asyncio
 import torch
 import torch.nn as nn
@@ -27,8 +27,7 @@ class BTSPUpdateMechanism:
     """
     Biological Tag-and-Store Plasticity mechanism for intelligent memory updates.
     
-    Implements a biologically-inspired decision system that determines when and how
-    to update memory traces based on novelty, importance, and error signals.
+    FIXED: Proper device handling for all neural networks and tensor operations.
     """
     
     def __init__(self,
@@ -38,18 +37,13 @@ class BTSPUpdateMechanism:
                  importance_weight: float = 0.3,
                  error_weight: float = 0.3,
                  learning_rate: float = 0.1,
-                 dimension: int = 512):
+                 dimension: int = 512,
+                 device: str = None):  # ADD device parameter
         """
-        Initialize BTSP mechanism.
+        Initialize BTSP mechanism with proper device handling.
         
         Args:
-            calcium_threshold: Threshold for triggering plasticity
-            decay_rate: Decay rate for calcium levels
-            novelty_weight: Weight for novelty component
-            importance_weight: Weight for importance component
-            error_weight: Weight for error component
-            learning_rate: Base learning rate
-            dimension: Input dimension for neural components
+            device: Device to use ('cuda', 'cpu', or None for auto-detect)
         """
         self.calcium_threshold = calcium_threshold
         self.decay_rate = decay_rate
@@ -59,11 +53,19 @@ class BTSPUpdateMechanism:
         self.base_learning_rate = learning_rate
         self.dimension = dimension
         
-        # Initialize neural components
+        # FIXED: Proper device handling
+        if device is None:
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        else:
+            self.device = device
+            
+        logger.info(f"BTSP using device: {self.device}")
+        
+        # Initialize neural components with proper device placement
         self._init_neural_components()
         
         # State tracking
-        self.calcium_levels = {}  # trace_id -> calcium level
+        self.calcium_levels = {}
         self.update_history = deque(maxlen=1000)
         self.performance_metrics = {
             'total_evaluations': 0,
@@ -74,10 +76,10 @@ class BTSPUpdateMechanism:
             'average_error': 0.0,
         }
         
-        logger.info("BTSP Update Mechanism initialized")
+        logger.info(f"BTSP Update Mechanism initialized on {self.device}")
 
     def _init_neural_components(self):
-        """Initialize neural network components for BTSP processing."""
+        """Initialize neural network components with proper device placement."""
         
         # Novelty detection network
         self.novelty_network = nn.Sequential(
@@ -88,35 +90,43 @@ class BTSPUpdateMechanism:
             nn.ReLU(),
             nn.Linear(self.dimension // 4, 1),
             nn.Sigmoid()
-        )
+        ).to(self.device)  # FIXED: Move to device
         
         # Importance estimation network
         self.importance_network = nn.Sequential(
-            nn.Linear(self.dimension + 64, self.dimension // 2),  # +64 for context features
+            nn.Linear(self.dimension + 64, self.dimension // 2),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(self.dimension // 2, self.dimension // 4),
             nn.ReLU(),
             nn.Linear(self.dimension // 4, 1),
             nn.Sigmoid()
-        )
+        ).to(self.device)  # FIXED: Move to device
         
         # Error prediction network
         self.error_network = nn.Sequential(
-            nn.Linear(self.dimension * 2, self.dimension),  # Input + reference
+            nn.Linear(self.dimension * 2, self.dimension),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(self.dimension, self.dimension // 2),
             nn.ReLU(),
             nn.Linear(self.dimension // 2, 1),
             nn.Sigmoid()
-        )
+        ).to(self.device)  # FIXED: Move to device
         
         # Calcium dynamics simulator
         self.calcium_dynamics = CalciumDynamicsSimulator(
             decay_rate=self.decay_rate,
             threshold=self.calcium_threshold
         )
+        
+        logger.info(f"BTSP neural networks initialized on {self.device}")
+
+    def _ensure_device(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Utility method to ensure tensor is on the correct device."""
+        if tensor.device.type != self.device:
+            return tensor.to(self.device)
+        return tensor
 
     async def should_update_async(self,
                                   input_state: torch.Tensor,
@@ -125,18 +135,13 @@ class BTSPUpdateMechanism:
                                   user_feedback: Optional[Dict[str, Any]] = None) -> BTSPUpdateDecision:
         """
         Determine if memory should be updated based on BTSP mechanism.
-        
-        Args:
-            input_state: Input tensor to evaluate
-            existing_traces: List of existing memory traces for comparison
-            context: Contextual information
-            user_feedback: Optional user feedback signals
-            
-        Returns:
-            BTSPUpdateDecision with update recommendation and parameters
+        FIXED: Proper device handling throughout.
         """
         try:
             current_time = time.time()
+            
+            # FIXED: Ensure input_state is on correct device
+            input_state = self._ensure_device(input_state)
             
             # Compute novelty score
             novelty_score = await self._compute_novelty(input_state, existing_traces)
@@ -210,18 +215,23 @@ class BTSPUpdateMechanism:
     async def _compute_novelty(self, 
                                input_state: torch.Tensor, 
                                existing_traces: List[Any]) -> float:
-        """Compute novelty score by comparing with existing traces."""
+        """Compute novelty score with proper device handling."""
         try:
             if not existing_traces:
                 return 1.0  # Completely novel if no existing traces
             
+            # FIXED: Ensure input is on correct device and normalized
+            input_state = self._ensure_device(input_state)
             input_normalized = F.normalize(input_state, dim=-1)
             
             # Compare with existing traces
             similarities = []
             for trace in existing_traces[-50:]:  # Check last 50 traces for efficiency
                 if hasattr(trace, 'content'):
-                    trace_content = F.normalize(trace.content, dim=-1)
+                    # FIXED: Ensure trace content is on same device
+                    trace_content = self._ensure_device(trace.content)
+                    trace_content = F.normalize(trace_content, dim=-1)
+                    
                     similarity = F.cosine_similarity(
                         input_normalized.unsqueeze(0), 
                         trace_content.unsqueeze(0)
@@ -237,6 +247,7 @@ class BTSPUpdateMechanism:
             
             # Apply novelty network for refinement
             with torch.no_grad():
+                # FIXED: Ensure input is on correct device for network
                 input_for_network = input_normalized.unsqueeze(0)
                 network_novelty = self.novelty_network(input_for_network).item()
                 
@@ -253,24 +264,31 @@ class BTSPUpdateMechanism:
                               input_state: torch.Tensor,
                               context: Dict[str, Any],
                               user_feedback: Optional[Dict[str, Any]] = None) -> float:
+        """Compute importance with proper device handling."""
         try:
+            # FIXED: Ensure input is on correct device
+            input_state = self._ensure_device(input_state)
             
+            # Extract context features on the same device
             context_features = self._extract_context_features(
-                context, user_feedback, device=input_state.device
+                context, user_feedback, device=self.device
             )
             
-            
+            # Normalize input
             input_normalized = F.normalize(input_state, dim=-1)
+            
+            # FIXED: Ensure both tensors are on same device before concatenation
+            context_features = self._ensure_device(context_features)
             combined_input = torch.cat([
                 input_normalized.unsqueeze(0),
                 context_features.unsqueeze(0)
             ], dim=1)
             
-            
+            # Apply importance network
             with torch.no_grad():
                 importance = self.importance_network(combined_input).item()
             
-            
+            # Apply user feedback multiplier
             if user_feedback:
                 feedback_multiplier = self._get_feedback_multiplier(user_feedback)
                 importance *= feedback_multiplier
@@ -285,11 +303,13 @@ class BTSPUpdateMechanism:
                          input_state: torch.Tensor,
                          existing_traces: List[Any],
                          context: Dict[str, Any]) -> float:
-    
+        """Compute error with proper device handling."""
         try:
             if not existing_traces:
                 return 0.5
             
+            # FIXED: Ensure input is on correct device
+            input_state = self._ensure_device(input_state)
             input_normalized = F.normalize(input_state, dim=-1)
             
             # Find most similar existing trace as reference
@@ -298,9 +318,10 @@ class BTSPUpdateMechanism:
             
             for trace in existing_traces[-20:]:
                 if hasattr(trace, 'content'):
-                    # Ensure trace content is on same device as input
-                    trace_content = trace.content.to(input_state.device)
+                    # FIXED: Ensure trace content is on same device as input
+                    trace_content = self._ensure_device(trace.content)
                     trace_content = F.normalize(trace_content, dim=-1)
+                    
                     similarity = F.cosine_similarity(
                         input_normalized.unsqueeze(0),
                         trace_content.unsqueeze(0)
@@ -313,9 +334,11 @@ class BTSPUpdateMechanism:
             if best_match is None:
                 return 0.5
             
-            # Compute error using network - ensure same device
-            reference_content = best_match.content.to(input_state.device)
+            # Compute error using network
+            reference_content = self._ensure_device(best_match.content)
             reference_content = F.normalize(reference_content, dim=-1)
+            
+            # FIXED: Ensure both tensors are on same device before concatenation
             combined_input = torch.cat([
                 input_normalized.unsqueeze(0),
                 reference_content.unsqueeze(0)
@@ -325,7 +348,9 @@ class BTSPUpdateMechanism:
                 error = self.error_network(combined_input).item()
             
             # Modulate based on context similarity
-            context_similarity = self._compute_context_similarity(context, getattr(best_match, 'context', {}))
+            context_similarity = self._compute_context_similarity(
+                context, getattr(best_match, 'context', {})
+            )
             error_adjustment = 1.0 - context_similarity * 0.3
             error *= error_adjustment
             
@@ -339,8 +364,10 @@ class BTSPUpdateMechanism:
                               context: Dict[str, Any],
                               user_feedback: Optional[Dict[str, Any]] = None,
                               device: str = 'cpu') -> torch.Tensor:
-    
-        features = torch.zeros(64, device=device)  # Create on specified device
+        """Extract context features with explicit device placement."""
+        
+        # FIXED: Create tensor on specified device
+        features = torch.zeros(64, device=device)
         
         try:
             # Task type encoding
@@ -537,6 +564,9 @@ class BTSPUpdateMechanism:
         else:
             stats['update_rate'] = 0.0
         
+        # Add device info
+        stats['device'] = self.device
+        
         # Add recent history statistics
         if self.update_history:
             recent_decisions = list(self.update_history)[-100:]  # Last 100 decisions
@@ -564,6 +594,7 @@ class BTSPUpdateMechanism:
                     'importance_weight': self.importance_weight,
                     'error_weight': self.error_weight,
                     'base_learning_rate': self.base_learning_rate,
+                    'device': self.device,  # FIXED: Save device info
                 },
                 'performance_metrics': self.performance_metrics,
                 'calcium_levels': self.calcium_levels,
@@ -579,7 +610,7 @@ class BTSPUpdateMechanism:
     def load_checkpoint(self, filepath: str):
         """Load BTSP mechanism state."""
         try:
-            checkpoint = torch.load(filepath, map_location='cpu')
+            checkpoint = torch.load(filepath, map_location=self.device)  # FIXED: Load to correct device
             
             # Restore performance metrics
             self.performance_metrics = checkpoint.get('performance_metrics', self.performance_metrics)

@@ -13,26 +13,11 @@ from collections import defaultdict, deque
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-# Fixed imports - handle both relative and absolute import cases
-try:
-    # Try relative imports first (when run as module)
-    from .memory_trace import MemoryTrace, TemporalMetadata, ConsolidationState
-    from .btsp import BTSPUpdateMechanism
-    from .lifecycle import MemoryLifecycleManager
-    from .dynamics import MultiTimescaleDynamicsEngine
-except ImportError:
-    # Fall back to absolute imports (when run directly)
-    try:
-        from core.memory_trace import MemoryTrace, TemporalMetadata, ConsolidationState
-        from core.btsp import BTSPUpdateMechanism
-        from core.lifecycle import MemoryLifecycleManager
-        from core.dynamics import MultiTimescaleDynamicsEngine
-    except ImportError:
-        # Final fallback - assume they're in the same directory
-        from memory_trace import MemoryTrace, TemporalMetadata, ConsolidationState
-        from btsp import BTSPUpdateMechanism
-        from lifecycle import MemoryLifecycleManager
-        from dynamics import MultiTimescaleDynamicsEngine
+# Standard absolute imports - cleaner and more reliable
+from core.memory_trace import MemoryTrace, TemporalMetadata, ConsolidationState
+from core.btsp import BTSPUpdateMechanism
+from core.lifecycle import MemoryLifecycleManager
+from core.dynamics import MultiTimescaleDynamicsEngine
 
 logger = logging.getLogger(__name__)
 
@@ -165,12 +150,13 @@ class EnhancedDistributedMemoryNode(nn.Module):
         self.last_weight_update = torch.zeros(self.capacity, device=self.device)
 
     def _init_biological_mechanisms(self):
-        """Initialize biological mechanisms with proper error handling"""
+        """Initialize biological mechanisms with proper device handling and error handling"""
         try:
-            # Initialize BTSP mechanism
-            self.btsp_mechanism = BTSPUpdateMechanism(
-                **self.config['btsp']
-            )
+            # Initialize BTSP mechanism with device parameter
+            btsp_config = self.config['btsp'].copy()
+            btsp_config['device'] = self.device  # FIXED: Pass device to BTSP
+            
+            self.btsp_mechanism = BTSPUpdateMechanism(**btsp_config)
             
             # Initialize dynamics engine - only accepts config parameter
             dynamics_config = self.config.get('dynamics', {})
@@ -208,7 +194,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
                 dynamics_engine=self.dynamics_engine
             )
             
-            logger.info(f"DMN {self.node_id}: Biological mechanisms initialized successfully")
+            logger.info(f"DMN {self.node_id}: Biological mechanisms initialized successfully on {self.device}")
             
         except Exception as e:
             logger.error(f"DMN {self.node_id}: Error initializing biological mechanisms: {e}")
@@ -221,7 +207,8 @@ class EnhancedDistributedMemoryNode(nn.Module):
         
         # Simple BTSP fallback
         class SimpleBTSP:
-            def __init__(self):
+            def __init__(self, device='cpu'):
+                self.device = device
                 pass
                 
             async def should_update_async(self, input_state, existing_traces, context, user_feedback=None):
@@ -237,7 +224,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
                 return SimpleDecision()
                 
             def get_stats(self):
-                return {"fallback_btsp": True}
+                return {"fallback_btsp": True, "device": self.device}
         
         # Simple dynamics engine fallback
         class SimpleDynamics:
@@ -273,7 +260,8 @@ class EnhancedDistributedMemoryNode(nn.Module):
             def get_lifecycle_statistics(self):
                 return {"fallback_lifecycle": True}
         
-        self.btsp_mechanism = SimpleBTSP()
+        # FIXED: Pass device to fallback BTSP too
+        self.btsp_mechanism = SimpleBTSP(device=self.device)
         self.dynamics_engine = SimpleDynamics()
         self.lifecycle_manager = SimpleLifecycle(self.node_id)
 
@@ -481,18 +469,27 @@ class EnhancedDistributedMemoryNode(nn.Module):
     
         current_time = time.time()
         
-        # DEVICE FIX: Store content on CPU for FAISS compatibility but keep original device reference
+        # Store content on CPU for FAISS compatibility
         original_device = content.device
         content_cpu = content.detach().cpu()
+        
+        # Ensure content is properly normalized
+        if torch.norm(content_cpu) == 0:
+            logger.error(f"❌ DMN {self.node_id}: Zero-norm content detected!")
+            return False
+            
+        content_normalized = F.normalize(content_cpu, dim=-1)
 
-        # Create memory trace with CPU content
+        # Create memory trace with normalized CPU content
         trace = MemoryTrace(
-            content=content_cpu,
+            content=content_normalized,
             context=context.copy(),
             timestamp=current_time,
             salience=salience,
             creation_node=self.node_id
         )
+        
+        logger.debug(f"🔍 DMN {self.node_id}: Created trace with content norm: {torch.norm(content_normalized):.6f}")
 
         if self.temporal_enabled and self.temporal_context_cache:
             trace.update_temporal_state(self.temporal_context_cache)
@@ -686,8 +683,12 @@ class EnhancedDistributedMemoryNode(nn.Module):
         # Prepare normalized query - always work with CPU for FAISS
         original_device = query.device
         query_cpu = query.detach().cpu()
-        query_normalized = F.normalize(query_cpu, dim=0)
+        query_normalized = F.normalize(query_cpu, dim=-1)  # Changed from dim=0 to dim=-1
         query_np = query_normalized.numpy().astype('float32').reshape(1, -1)
+        
+        # DEBUG: Log query preparation
+        logger.debug(f"🔍 DMN {self.node_id}: Query shape after normalization: {query_np.shape}")
+        logger.debug(f"🔍 DMN {self.node_id}: Query norm: {np.linalg.norm(query_np):.6f}")
         
         logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Query shape: {query_np.shape}")
 
@@ -898,18 +899,35 @@ class EnhancedDistributedMemoryNode(nn.Module):
         try:
             # Always use CPU for FAISS operations
             content_cpu = trace.content.detach().cpu()
-            content_normalized = F.normalize(content_cpu, dim=0)
+            content_normalized = F.normalize(content_cpu, dim=-1)  # Changed from dim=0 to dim=-1
             content_np = content_normalized.numpy().astype('float32').reshape(1, -1)
+                
+            # DEBUG: Verify normalization
+            norm_value = np.linalg.norm(content_np)
+            logger.debug(f"🔍 DMN {self.node_id}: Adding content with norm: {norm_value:.6f}")
+            assert abs(norm_value - 1.0) < 1e-5, f"Content not properly normalized: {norm_value}"
 
-            # Assign FAISS ID
+                # Assign FAISS ID
             faiss_id = self.next_faiss_id
             self.next_faiss_id += 1
 
-            # Add to index
+                # Add to index
             self.index.add_with_ids(content_np, np.array([faiss_id], dtype=np.int64))
 
             # Update mapping
             self.faiss_id_to_trace_id[faiss_id] = trace.trace_id
+            
+            # CRITICAL: Verify the addition worked
+            current_total = self.index.ntotal
+            logger.debug(f"🔍 DMN {self.node_id}: Index size after addition: {current_total}")
+            
+            # Immediate verification search
+            test_similarities, test_ids = self.index.search(content_np, 1)
+            if len(test_ids[0]) > 0 and test_ids[0][0] == faiss_id:
+                logger.debug(f"✅ DMN {self.node_id}: Successfully verified trace {trace.trace_id}")
+            else:
+                logger.error(f"❌ DMN {self.node_id}: FAILED to verify trace {trace.trace_id}")
+                logger.error(f"❌ Expected FAISS ID: {faiss_id}, Found: {test_ids[0] if len(test_ids[0]) > 0 else 'NONE'}")
             
             # Verify the addition
             current_total = self.index.ntotal
