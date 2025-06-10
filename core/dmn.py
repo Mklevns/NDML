@@ -1337,45 +1337,190 @@ class EnhancedDistributedMemoryNode(nn.Module):
 
     def _rebuild_faiss_index(self):
     
+    
+        logger.info(f"DMN {self.node_id}: Starting FAISS index rebuild...")
+        
         # Clear existing index
         self.index.reset()
-
-        if self.memory_traces:
-            # Prepare all vectors and IDs - USE CPU
-            vectors = []
-            faiss_ids = []
-
-            # Rebuild mapping
-            new_faiss_id_to_trace_id = {}
-            new_faiss_id = 0
-
-            for trace in self.memory_traces:
-                try:
-                    content_cpu = trace.content.detach().cpu()
-                    content_normalized = F.normalize(content_cpu, dim=0)
-                    vectors.append(content_normalized.detach().cpu().numpy())
-
-                    faiss_ids.append(new_faiss_id)
-                    new_faiss_id_to_trace_id[new_faiss_id] = trace.trace_id
-                    new_faiss_id += 1
-                except Exception as e:
-                    logger.warning(f"DMN {self.node_id}: Failed to process trace {trace.trace_id} for index rebuild: {e}")
+        
+        if not self.memory_traces:
+            logger.warning(f"DMN {self.node_id}: No memory traces to rebuild index")
+            return
+            
+        # Prepare all vectors and IDs - USE CPU
+        vectors = []
+        faiss_ids = []
+        failed_traces = []
+        
+        # Rebuild mapping
+        new_faiss_id_to_trace_id = {}
+        new_faiss_id = 0
+        
+        logger.debug(f"DMN {self.node_id}: Processing {len(self.memory_traces)} memory traces...")
+        
+        for i, trace in enumerate(self.memory_traces):
+            try:
+                # Ensure content is on CPU and proper shape
+                content_cpu = trace.content.detach().cpu()
+                
+                # Debug: Log vector shape and type
+                if i == 0:  # Log first trace for debugging
+                    logger.debug(f"DMN {self.node_id}: First trace shape: {content_cpu.shape}, dtype: {content_cpu.dtype}")
+                
+                # Check if content is valid
+                if torch.isnan(content_cpu).any() or torch.isinf(content_cpu).any():
+                    logger.warning(f"DMN {self.node_id}: Trace {trace.trace_id} contains NaN/Inf values")
+                    failed_traces.append(trace.trace_id)
                     continue
+                    
+                # Normalize vector - FIXED: Use dim=-1 for proper vector normalization
+                if content_cpu.dim() == 1:
+                    content_normalized = F.normalize(content_cpu, dim=0)  # 1D vector
+                else:
+                    content_normalized = F.normalize(content_cpu, dim=-1)  # Multi-dim
+                
+                # Convert to numpy
+                vector_np = content_normalized.detach().cpu().numpy().astype('float32')
+                
+                # Ensure proper shape for FAISS (should be 1D for single vector)
+                if vector_np.ndim > 1:
+                    vector_np = vector_np.flatten()
+                
+                vectors.append(vector_np)
+                faiss_ids.append(new_faiss_id)
+                new_faiss_id_to_trace_id[new_faiss_id] = trace.trace_id
+                new_faiss_id += 1
+                
+            except Exception as e:
+                logger.warning(f"DMN {self.node_id}: Failed to process trace {trace.trace_id}: {e}")
+                failed_traces.append(trace.trace_id)
+                continue
+        
+        if not vectors:
+            logger.error(f"DMN {self.node_id}: No valid vectors for index rebuild!")
+            return
+            
+        try:
+            # Convert to numpy arrays
+            vectors_np = np.vstack(vectors).astype('float32')
+            faiss_ids_np = np.array(faiss_ids, dtype=np.int64)
+            
+            logger.debug(f"DMN {self.node_id}: Final vectors shape: {vectors_np.shape}")
+            logger.debug(f"DMN {self.node_id}: FAISS IDs shape: {faiss_ids_np.shape}")
+            
+            # Add to FAISS index
+            self.index.add_with_ids(vectors_np, faiss_ids_np)
+            
+            # Update mappings
+            self.faiss_id_to_trace_id = new_faiss_id_to_trace_id
+            self.next_faiss_id = new_faiss_id
+            
+            # CRUCIAL: Verify the rebuild worked
+            index_total = self.index.ntotal
+            expected_total = len(vectors)
+            
+            if index_total != expected_total:
+                logger.error(f"DMN {self.node_id}: Index rebuild verification failed! "
+                            f"Expected {expected_total}, got {index_total}")
+                return
+                
+            # Test with a simple search
+            if vectors_np.shape[0] > 0:
+                test_query = vectors_np[0:1]  # Use first vector as test
+                similarities, found_ids = self.index.search(test_query, 1)
+                
+                if len(found_ids[0]) > 0 and found_ids[0][0] in new_faiss_id_to_trace_id:
+                    logger.info(f"DMN {self.node_id}: ✅ Index rebuild SUCCESS! "
+                            f"Added {len(vectors)} vectors, verification passed")
+                else:
+                    logger.error(f"DMN {self.node_id}: ❌ Index rebuild verification FAILED! "
+                                f"Test search returned invalid results")
+            
+            # Log any failures
+            if failed_traces:
+                logger.warning(f"DMN {self.node_id}: {len(failed_traces)} traces failed during rebuild: "
+                            f"{failed_traces[:5]}{'...' if len(failed_traces) > 5 else ''}")
+                
+        except Exception as e:
+            logger.error(f"DMN {self.node_id}: CRITICAL: Failed to rebuild FAISS index: {e}")
+            import traceback
+            logger.error(f"DMN {self.node_id}: Full traceback: {traceback.format_exc()}")
 
-            if vectors:
-                try:
-                    # Add all vectors at once
-                    vectors_np = np.vstack(vectors).astype('float32')
-                    faiss_ids_np = np.array(faiss_ids, dtype=np.int64)
 
-                    self.index.add_with_ids(vectors_np, faiss_ids_np)
+def debug_index_state(self):
+    """Add this helper method to debug index state."""
+    
+    logger.info(f"🔍 DMN {self.node_id} INDEX DEBUG:")
+    logger.info(f"  - Memory traces: {len(self.memory_traces)}")
+    logger.info(f"  - FAISS total: {self.index.ntotal}")
+    logger.info(f"  - ID mapping size: {len(self.faiss_id_to_trace_id)}")
+    logger.info(f"  - Next FAISS ID: {self.next_faiss_id}")
+    
+    # Check for orphaned traces
+    indexed_trace_ids = set(self.faiss_id_to_trace_id.values())
+    memory_trace_ids = {trace.trace_id for trace in self.memory_traces}
+    
+    orphaned = memory_trace_ids - indexed_trace_ids
+    extra = indexed_trace_ids - memory_trace_ids
+    
+    if orphaned:
+        logger.warning(f"  - ⚠️ Orphaned traces (in memory but not indexed): {len(orphaned)}")
+    if extra:
+        logger.warning(f"  - ⚠️ Extra indexed traces (indexed but not in memory): {len(extra)}")
+    
+    if not orphaned and not extra and len(self.memory_traces) == self.index.ntotal:
+        logger.info(f"  - ✅ Index state is consistent!")
+    else:
+        logger.error(f"  - ❌ Index state is INCONSISTENT!")
+        
+    return {
+        'memory_traces': len(self.memory_traces),
+        'faiss_total': self.index.ntotal,
+        'mapping_size': len(self.faiss_id_to_trace_id),
+        'orphaned_traces': len(orphaned),
+        'extra_indexed': len(extra),
+        'consistent': len(orphaned) == 0 and len(extra) == 0
+    }
 
-                    # Update mappings
-                    self.faiss_id_to_trace_id = new_faiss_id_to_trace_id
-                    self.next_faiss_id = new_faiss_id
 
-                    logger.info(f"DMN {self.node_id}: Rebuilt FAISS index with {len(vectors)} traces")
-                except Exception as e:
-                    logger.error(f"DMN {self.node_id}: Failed to rebuild FAISS index: {e}")
+    def test_simple_retrieval(self):
+        """Test method to verify retrieval works after rebuild."""
+        
+        if not self.memory_traces or self.index.ntotal == 0:
+            logger.warning(f"DMN {self.node_id}: No data to test retrieval")
+            return False
+            
+        try:
+            # Use the first memory trace as a test query
+            test_trace = self.memory_traces[0]
+            test_content = test_trace.content.detach().cpu()
+            
+            # Normalize the same way as in rebuild
+            if test_content.dim() == 1:
+                test_normalized = F.normalize(test_content, dim=0)
             else:
-                logger.warning(f"DMN {self.node_id}: No valid vectors for index rebuild")
+                test_normalized = F.normalize(test_content, dim=-1)
+                
+            test_query = test_normalized.numpy().astype('float32').reshape(1, -1)
+            
+            # Search
+            similarities, faiss_ids = self.index.search(test_query, 1)
+            
+            if len(faiss_ids[0]) > 0:
+                found_faiss_id = faiss_ids[0][0]
+                similarity = similarities[0][0]
+                
+                if found_faiss_id in self.faiss_id_to_trace_id:
+                    found_trace_id = self.faiss_id_to_trace_id[found_faiss_id]
+                    logger.info(f"DMN {self.node_id}: ✅ Retrieval test PASSED! "
+                            f"Found {found_trace_id} with similarity {similarity:.4f}")
+                    return True
+                else:
+                    logger.error(f"DMN {self.node_id}: ❌ Found FAISS ID {found_faiss_id} not in mapping!")
+            else:
+                logger.error(f"DMN {self.node_id}: ❌ No results returned from search!")
+                
+        except Exception as e:
+            logger.error(f"DMN {self.node_id}: ❌ Retrieval test failed with error: {e}")
+            
+        return False
