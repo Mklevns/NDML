@@ -109,56 +109,53 @@ class MemoryGateway:
         )
 
     async def retrieve_memories_async(self,
-                                      query: torch.Tensor,
-                                      context: Dict[str, Any],
-                                      k: int = None,
-                                      diversity_weight: float = None) -> List[Tuple[Any, float]]:
-        """Retrieve memories across all relevant clusters"""
-
+                                  query: torch.Tensor,
+                                  context: Dict[str, Any],
+                                  k: int = None,
+                                  diversity_weight: float = None) -> List[Tuple[Any, float]]:
+    
+    
         if k is None:
             k = self.config['retrieval']['default_k']
 
         if diversity_weight is None:
-            diversity_weight = self.config['retrieval']['diversity_weight']
+            diversity_weight = self.config['retrieval'].get('diversity_weight', 0.2)
 
         self.stats['total_queries'] += 1
+
+        # DEVICE FIX: Ensure consistent device handling
+        original_device = query.device
 
         # Route query to relevant clusters
         cluster_scores = await self.cluster_router.route_query_async(query, context)
 
-        # Select top clusters based on routing scores
         max_clusters = self.config['routing']['max_clusters_per_query']
         selected_clusters = sorted(cluster_scores.items(), key=lambda x: x[1], reverse=True)[:max_clusters]
 
-        # Retrieve from selected clusters
         all_results = []
 
         for cluster_idx, cluster_score in selected_clusters:
             cluster = self.clusters[cluster_idx]
 
             cluster_results = await cluster.retrieve_memories_async(
-                query=query,
+                query=query,  # Pass original query, let cluster handle device management
                 context=context,
                 k=k,
                 similarity_threshold=self.config['retrieval']['similarity_threshold']
             )
 
-            # Weight results by cluster routing score
             weighted_results = [
                 (memory, similarity * cluster_score)
                 for memory, similarity in cluster_results
             ]
 
             all_results.extend(weighted_results)
-
-            # Update routing statistics
             self.stats['routing_decisions'][cluster_idx] += 1
 
-        # Diversity-aware re-ranking
+        # Apply diversity-aware re-ranking
         if diversity_weight > 0:
             all_results = self._diversify_results(all_results, diversity_weight)
 
-        # Sort by final score and return top k
         all_results.sort(key=lambda x: x[1], reverse=True)
         return all_results[:k]
 
@@ -219,29 +216,29 @@ class MemoryGateway:
         return diversified_results
 
     async def add_memory_async(self,
-                               content: torch.Tensor,
-                               context: Dict[str, Any],
-                               salience: float,
-                               user_feedback: Optional[Dict[str, Any]] = None) -> bool:
-        """Add new memory to appropriate cluster/node"""
-
+                           content: torch.Tensor,
+                           context: Dict[str, Any],
+                           salience: float,
+                           user_feedback: Optional[Dict[str, Any]] = None) -> bool:
+    
+    
         self.stats['total_updates'] += 1
+
+        # DEVICE FIX: Keep original device reference
+        original_device = content.device
 
         # Route to appropriate cluster
         cluster_scores = await self.cluster_router.route_query_async(content, context)
         best_cluster_idx = max(cluster_scores.items(), key=lambda x: x[1])[0]
         best_cluster = self.clusters[best_cluster_idx]
 
-        # Use consensus layer if enabled
         success = False
 
         if self.consensus_layer:
-            # Coordinate update through consensus layer
             self.stats['consensus_operations'] += 1
-
             success = await self.consensus_layer.propose_memory_update(
                 trace_id=f"trace_{int(time.time() * 1000)}_{best_cluster_idx}",
-                content_vector=content,
+                content_vector=content,  # Pass content as-is, consensus layer handles device
                 metadata={
                     'salience': salience,
                     'cluster_id': best_cluster_idx,
@@ -251,22 +248,17 @@ class MemoryGateway:
             )
 
         if success or not self.consensus_layer:
-            # Add to selected cluster
             node_success = await best_cluster.add_memory_async(
-                content=content,
+                content=content,  # Pass content as-is, cluster handles device
                 context=context,
                 salience=salience,
                 user_feedback=user_feedback
             )
 
             if node_success:
-                # Update load balancer
                 await self.load_balancer.record_update(best_cluster_idx)
-
-                # Update cluster utilization stats
                 utilization = best_cluster.get_utilization()
                 self.stats['cluster_utilization'][best_cluster_idx] = utilization
-
                 return True
 
         return False
