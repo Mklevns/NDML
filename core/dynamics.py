@@ -20,12 +20,22 @@ Version: 1.0.0
 import asyncio
 import numpy as np
 import time
+import torch  # ADD THIS LINE
+import logging
 from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
 from abc import ABC, abstractmethod
-import logging
 from enum import Enum
+
+# Add ConsolidationState import
+try:
+    from .memory_trace import ConsolidationState
+except ImportError:
+    try:
+        from core.memory_trace import ConsolidationState
+    except ImportError:
+        from memory_trace import ConsolidationState
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -131,6 +141,16 @@ class TemporalProcess(ABC):
         pass
         
     @abstractmethod
+    def _create_spike_pair_filter(self):
+        """Create spike pair timing filter for STDP-like dynamics"""
+        return {
+            'tau_pre': 20.0,  # Pre-synaptic window (ms)
+            'tau_post': 20.0,  # Post-synaptic window (ms) 
+            'window_size': 50.0,  # Total window size (ms)
+            'amplitude': 1.0,  # Filter amplitude
+            'enabled': True
+        }
+
     def compute_performance_metric(self) -> float:
         """Compute current performance metric for this process."""
         pass
@@ -317,6 +337,16 @@ class FastSynapticProcess(TemporalProcess):
         if len(self.performance_history) == 0:
             return 0.5
         return float(np.mean(list(self.performance_history)[-10:]))
+    def _create_spike_pair_filter(self):
+        """Create spike pair timing filter for STDP-like dynamics"""
+        return {
+            'tau_pre': 20.0,  # Pre-synaptic window (ms)
+            'tau_post': 20.0,  # Post-synaptic window (ms) 
+            'window_size': 50.0,  # Total window size (ms)
+            'amplitude': 1.0,  # Filter amplitude
+            'enabled': True
+        }
+
 
 class CalciumPlasticityProcess(TemporalProcess):
     """Calcium-dependent plasticity process (hundreds of milliseconds)."""
@@ -497,6 +527,16 @@ class CalciumPlasticityProcess(TemporalProcess):
         if len(self.performance_history) == 0:
             return 0.5
         return float(np.mean(list(self.performance_history)[-10:]))
+    def _create_spike_pair_filter(self):
+        """Create spike pair timing filter for STDP-like dynamics"""
+        return {
+            'tau_pre': 20.0,  # Pre-synaptic window (ms)
+            'tau_post': 20.0,  # Post-synaptic window (ms) 
+            'window_size': 50.0,  # Total window size (ms)
+            'amplitude': 1.0,  # Filter amplitude
+            'enabled': True
+        }
+
 
 class ProteinSynthesisProcess(TemporalProcess):
     """Protein synthesis-dependent memory consolidation (minutes to hours)."""
@@ -663,6 +703,16 @@ class ProteinSynthesisProcess(TemporalProcess):
         return float(np.mean(list(self.performance_history)[-10:]))
 
 # Cross-Scale Communication System
+    def _create_spike_pair_filter(self):
+        """Create spike pair timing filter for STDP-like dynamics"""
+        return {
+            'tau_pre': 20.0,  # Pre-synaptic window (ms)
+            'tau_post': 20.0,  # Post-synaptic window (ms) 
+            'window_size': 50.0,  # Total window size (ms)
+            'amplitude': 1.0,  # Filter amplitude
+            'enabled': True
+        }
+
 
 class CrossScaleCommunicator:
     """Manages communication between different timescale processes."""
@@ -671,6 +721,18 @@ class CrossScaleCommunicator:
         self.processes = processes
         self.communication_channels = {}
         self.message_buffer = defaultdict(list)
+    def _spike_pair_filter(self, spike_data):
+        """Filter spike pairs for STDP-like communication."""
+        if not isinstance(spike_data, dict):
+            return spike_data
+        return {
+            "pre_spikes": spike_data.get("pre_spikes", []),
+            "post_spikes": spike_data.get("post_spikes", []),
+            "timing_window": 20.0,
+            "plasticity_threshold": 0.1
+        }
+        self.message_buffer =         self._spike_pair_filter = self._create_spike_pair_filter()
+        defaultdict(list)
         
     async def setup_communication_channels(self) -> None:
         """Set up communication channels between processes."""
@@ -803,6 +865,50 @@ class CrossScaleCommunicator:
         pass
 
 # Main Dynamics Engine
+    def _spike_pair_filter(self, spike_data):
+        """Filter spike pairs for STDP-like communication."""
+        if not isinstance(spike_data, dict):
+            return spike_data
+        return {
+            "pre_spikes": spike_data.get("pre_spikes", []),
+            "post_spikes": spike_data.get("post_spikes", []),
+            "timing_window": 20.0,
+            "plasticity_threshold": 0.1
+        }
+
+    def _plasticity_filter(self, plasticity_data):
+        """Filter plasticity events for calcium-protein communication."""
+        if not isinstance(plasticity_data, dict):
+            return plasticity_data
+        return {
+            "calcium_level": plasticity_data.get("calcium_level", 0.0),
+            "protein_threshold": 0.5,
+            "consolidation_strength": plasticity_data.get("strength", 1.0),
+            "duration_ms": plasticity_data.get("duration", 100.0)
+        }
+
+    def _consolidation_filter(self, consolidation_data):
+        """Filter consolidation events for protein-homeostatic communication."""
+        if not isinstance(consolidation_data, dict):
+            return consolidation_data
+        return {
+            "consolidation_strength": consolidation_data.get("strength", 1.0),
+            "memory_traces": consolidation_data.get("traces", []),
+            "synaptic_tags": consolidation_data.get("tags", []),
+            "permanence_factor": 0.8
+        }
+
+    def _homeostatic_filter(self, homeostatic_data):
+        """Filter homeostatic signals for system-wide regulation."""
+        if not isinstance(homeostatic_data, dict):
+            return homeostatic_data
+        return {
+            "regulation_strength": homeostatic_data.get("strength", 1.0),
+            "target_processes": homeostatic_data.get("targets", []),
+            "adjustment_factor": 0.1,
+            "stability_threshold": 0.05
+        }
+
 
 class MultiTimescaleDynamicsEngine:
     """Main multi-timescale dynamics engine for NDML."""
@@ -913,6 +1019,111 @@ class MultiTimescaleDynamicsEngine:
         self.step_count += 1
         
         return temporal_state
+    async def process_update_async(self, content: torch.Tensor, salience: float, calcium_level: float) -> bool:
+    
+        try:
+            # Inject update event into temporal dynamics
+            if salience > 0.7:  # High salience updates
+                success = await self.inject_event(
+                    "memory_update",
+                    "fast_synaptic",
+                    {
+                        "content_norm": float(torch.norm(content)),
+                        "salience": float(salience),
+                        "calcium_level": float(calcium_level)
+                    }
+                )
+                return success
+            return True
+        except Exception as e:
+            logger.error(f"Error processing memory update: {e}")
+            return False
+
+    async def process_retrieval_async(self, query: torch.Tensor, retrieved_traces: List[Any]) -> bool:
+        """Process memory retrieval through temporal dynamics."""
+        try:
+            if retrieved_traces:
+                # Inject retrieval event
+                success = await self.inject_event(
+                    "memory_retrieval",
+                    "calcium_plasticity",
+                    {
+                        "query_norm": float(torch.norm(query)),
+                        "num_retrieved": len(retrieved_traces),
+                        "avg_salience": float(np.mean([getattr(trace, 'salience', 0.5) for trace in retrieved_traces]))
+                    }
+                )
+                return success
+            return True
+        except Exception as e:
+            logger.error(f"Error processing memory retrieval: {e}")
+            return False
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get comprehensive temporal dynamics statistics."""
+        try:
+            # Get performance summary from monitor
+            perf_summary = self.performance_monitor.get_performance_summary()
+            
+            # Get process-level stats
+            process_stats = {}
+            for name, process in self.processes.items():
+                if hasattr(process, 'performance_metrics'):
+                    process_stats[name] = process.performance_metrics.copy()
+            
+            return {
+                'system_health': perf_summary.get('system_health', 0.8),
+                'step_count': getattr(self, 'step_count', 0),
+                'current_time': getattr(self, 'current_time', 0.0),
+                'is_running': getattr(self, 'is_running', False),
+                'temporal_coherence': self._compute_temporal_coherence(),
+                'system_stability': self._compute_system_stability(),
+                'process_stats': process_stats,
+                'performance_summary': perf_summary
+            }
+        except Exception as e:
+            logger.error(f"Error getting dynamics stats: {e}")
+            return {
+                'system_health': 0.8,
+                'step_count': 0,
+                'current_time': 0.0,
+                'is_running': False,
+                'error': str(e)
+            }
+
+    async def initiate_consolidation(self, trace: Any, current_time: float) -> None:
+        """Initiate consolidation for a memory trace."""
+        try:
+            if hasattr(trace, 'temporal_metadata'):
+                trace.temporal_metadata.consolidation_state = ConsolidationState.CONSOLIDATING
+                
+            # Inject consolidation event
+            await self.inject_event(
+                "consolidation_initiation",
+                "protein_synthesis",
+                {
+                    "trace_id": getattr(trace, 'trace_id', 'unknown'),
+                    "salience": getattr(trace, 'salience', 0.5),
+                    "current_time": current_time
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error initiating consolidation: {e}")
+
+    async def update_consolidation_progress(self, trace: Any, current_time: float, progress_rate: float) -> None:
+        """Update consolidation progress for a memory trace."""
+        try:
+            if hasattr(trace, 'temporal_metadata'):
+                current_progress = getattr(trace.temporal_metadata, 'consolidation_strength', 0.0)
+                new_progress = min(1.0, current_progress + progress_rate * 0.01)
+                trace.temporal_metadata.consolidation_strength = new_progress
+                
+                # Check if consolidation is complete
+                if new_progress >= 0.95:
+                    trace.temporal_metadata.consolidation_state = ConsolidationState.CONSOLIDATED
+                    
+        except Exception as e:
+            logger.error(f"Error updating consolidation progress: {e}")
         
     def _compute_temporal_coherence(self) -> float:
         """Compute temporal coherence across all timescales."""
