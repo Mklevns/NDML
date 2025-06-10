@@ -546,11 +546,12 @@ class ClusterRouter(nn.Module):
         self.performance_feedback = []
 
     async def route_query_async(self, query: torch.Tensor, context: Dict[str, Any]) -> Dict[int, float]:
-        """Route query to clusters and return scores"""
-
+    
+    
         with torch.no_grad():
-            # Normalize query
-            query_norm = F.normalize(query, dim=-1)
+            # Normalize query - ensure it's on CPU for consistent processing
+            query_cpu = query.detach().cpu() if query.device.type != 'cpu' else query
+            query_norm = F.normalize(query_cpu, dim=-1)
 
             # Get routing scores
             if self.config['strategy'] == 'learned':
@@ -558,11 +559,11 @@ class ClusterRouter(nn.Module):
                 cluster_scores = {i: float(scores[i]) for i in range(self.num_clusters)}
 
             elif self.config['strategy'] == 'round_robin':
-                # Simple round-robin routing
+                # Simple round-robin routing - ensure all clusters get equal weight
                 cluster_scores = {i: 1.0 / self.num_clusters for i in range(self.num_clusters)}
 
             elif self.config['strategy'] == 'load_based':
-                # Route based on cluster load (would need load information)
+                # Route based on cluster load (placeholder implementation)
                 cluster_scores = {i: 1.0 / self.num_clusters for i in range(self.num_clusters)}
 
             else:
@@ -576,6 +577,9 @@ class ClusterRouter(nn.Module):
             'scores': cluster_scores,
             'timestamp': time.time()
         })
+        
+        # DEBUG: Log routing decisions
+        logger.debug(f"🔍 DEBUG: Routing scores: {cluster_scores}")
 
         return cluster_scores
 
@@ -635,28 +639,21 @@ class NodeSelector:
         self.config = config
         self.selection_history = defaultdict(int)
 
-    async def select_nodes_for_query(self, query: torch.Tensor, context: Dict[str, Any]) -> List[
-        EnhancedDistributedMemoryNode]:
-        """Select nodes for memory retrieval"""
-
-        # For retrieval, we typically want to query multiple nodes
-        # to get diverse results
-
-        # Simple strategy: select top 50% of nodes by some criteria
-        num_to_select = max(1, len(self.nodes) // 2)
-
-        # For now, just rotate through nodes to balance load
-        # In a more sophisticated implementation, this would consider:
-        # - Node specialization
-        # - Current load
-        # - Historical performance
-
-        selected_nodes = []
-        for i in range(num_to_select):
-            node_idx = (sum(self.selection_history.values()) + i) % len(self.nodes)
-            selected_nodes.append(self.nodes[node_idx])
-            self.selection_history[node_idx] += 1
-
+    async def select_nodes_for_query(self, query: torch.Tensor, context: Dict[str, Any]) -> List[EnhancedDistributedMemoryNode]:
+    
+    
+        # For retrieval, query ALL nodes to ensure we don't miss memories
+        # This is more thorough than the original 50% selection
+        
+        # For basic testing, select all nodes to ensure comprehensive search
+        selected_nodes = self.nodes.copy()
+        
+        # Update selection history for all nodes
+        for node in selected_nodes:
+            self.selection_history[id(node)] += 1
+        
+        logger.debug(f"🔍 DEBUG: Selected {len(selected_nodes)} nodes for query")
+        
         return selected_nodes
 
     async def select_node_for_update(self, content: torch.Tensor,
