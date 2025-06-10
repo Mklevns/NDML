@@ -669,62 +669,93 @@ class EnhancedDistributedMemoryNode(nn.Module):
                                   temporal_context: Optional[Dict[str, Any]] = None) -> List[Tuple[MemoryTrace, float]]:
     
     
+        logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Starting retrieval. Index total: {self.index.ntotal}")
+        
         if self.index.ntotal == 0:
+            logger.warning(f"⚠️ DMN {self.node_id}: Index is empty, returning no results")
             return []
 
         if similarity_threshold is None:
             similarity_threshold = self.config['indexing']['similarity_threshold']
+        
+        logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Using similarity threshold: {similarity_threshold}")
 
         if temporal_context is None and self.temporal_enabled:
             temporal_context = self.temporal_context_cache
 
-        # DEVICE FIX: Always work with CPU for FAISS, but keep track of original device
+        # Prepare normalized query - always work with CPU for FAISS
         original_device = query.device
         query_cpu = query.detach().cpu()
         query_normalized = F.normalize(query_cpu, dim=0)
         query_np = query_normalized.numpy().astype('float32').reshape(1, -1)
+        
+        logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Query shape: {query_np.shape}")
 
         try:
+            # Search more than k to allow for filtering
             search_k = min(k * 3, self.index.ntotal)
+            logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Searching for top {search_k} results")
+            
             similarities, faiss_ids = self.index.search(query_np, search_k)
+            
+            logger.debug(f"🔍 DEBUG: DMN {self.node_id}: FAISS returned {len(similarities[0])} results")
+            logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Top similarities: {similarities[0][:3]}")
+            logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Top FAISS IDs: {faiss_ids[0][:3]}")
 
+            # Process results
             results = []
             current_time = time.time()
 
-            for sim, faiss_id in zip(similarities[0], faiss_ids[0]):
-                if sim < similarity_threshold or faiss_id not in self.faiss_id_to_trace_id:
+            for i, (sim, faiss_id) in enumerate(zip(similarities[0], faiss_ids[0])):
+                logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Processing result {i}: sim={sim:.4f}, faiss_id={faiss_id}")
+                
+                if sim < similarity_threshold:
+                    logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Similarity {sim:.4f} below threshold {similarity_threshold}")
+                    continue
+                    
+                if faiss_id not in self.faiss_id_to_trace_id:
+                    logger.warning(f"⚠️ DMN {self.node_id}: FAISS ID {faiss_id} not found in mapping")
                     continue
 
                 trace_id = self.faiss_id_to_trace_id[faiss_id]
                 if trace_id not in self.trace_index:
+                    logger.warning(f"⚠️ DMN {self.node_id}: Trace ID {trace_id} not found in trace index")
                     continue
 
                 trace_idx = self.trace_index[trace_id]
                 if trace_idx >= len(self.memory_traces):
+                    logger.warning(f"⚠️ DMN {self.node_id}: Trace index {trace_idx} out of bounds")
                     continue
 
                 trace = self.memory_traces[trace_idx]
 
+                # Apply context filtering
                 if context_filter and not self._matches_context_filter(trace, context_filter):
+                    logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Trace {trace_id} filtered out by context")
                     continue
 
-                # DEVICE FIX: Apply temporal modulation using CPU tensors
+                # Apply temporal modulation
                 if self.temporal_enabled and temporal_context:
                     modulated_sim = self._apply_temporal_modulation(sim, trace, temporal_context)
                 else:
                     modulated_sim = sim
 
+                # Update access statistics
                 trace.update_access_stats(current_time, context_relevant=True)
                 self.access_patterns[trace_id].append(current_time)
 
                 results.append((trace, float(modulated_sim)))
+                logger.debug(f"✅ DMN {self.node_id}: Added result: trace_id={trace_id}, similarity={modulated_sim:.4f}")
 
                 if len(results) >= k:
                     break
 
+            # Sort by modulated similarity
             results.sort(key=lambda x: x[1], reverse=True)
+            
+            logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Returning {len(results)} results")
 
-            # DEVICE FIX: Pass CPU query to dynamics engine
+            # Update dynamics engine
             try:
                 await self.dynamics_engine.process_retrieval_async(
                     query_cpu, [trace for trace, _ in results]
@@ -732,6 +763,7 @@ class EnhancedDistributedMemoryNode(nn.Module):
             except Exception as e:
                 logger.debug(f"DMN {self.node_id}: Dynamics engine retrieval processing failed: {e}")
 
+            # Inject temporal events
             if self.temporal_enabled and results:
                 try:
                     await self._handle_temporal_events_on_retrieval(query_cpu, results, temporal_context)
@@ -742,7 +774,9 @@ class EnhancedDistributedMemoryNode(nn.Module):
             return results
 
         except Exception as e:
-            logger.error(f"DMN {self.node_id}: Retrieval error: {e}")
+            logger.error(f"❌ DMN {self.node_id}: Retrieval error: {e}")
+            import traceback
+            logger.error(f"❌ DMN {self.node_id}: Full traceback:\n{traceback.format_exc()}")
             return []
 
     def _apply_temporal_modulation(self, base_similarity: float, 
@@ -860,29 +894,42 @@ class EnhancedDistributedMemoryNode(nn.Module):
 
     async def _add_to_index_async(self, trace: MemoryTrace):
     
-    # Always use CPU for FAISS operations - more stable
-        content_cpu = trace.content.detach().cpu()
-        content_normalized = F.normalize(content_cpu, dim=0)
-        content_np = content_normalized.detach().cpu().numpy().astype('float32').reshape(1, -1)
-
-        # Assign FAISS ID
-        faiss_id = self.next_faiss_id
-        self.next_faiss_id += 1
-
+    
         try:
+            # Always use CPU for FAISS operations
+            content_cpu = trace.content.detach().cpu()
+            content_normalized = F.normalize(content_cpu, dim=0)
+            content_np = content_normalized.numpy().astype('float32').reshape(1, -1)
+
+            # Assign FAISS ID
+            faiss_id = self.next_faiss_id
+            self.next_faiss_id += 1
+
             # Add to index
             self.index.add_with_ids(content_np, np.array([faiss_id], dtype=np.int64))
 
             # Update mapping
             self.faiss_id_to_trace_id[faiss_id] = trace.trace_id
             
+            # Verify the addition
+            current_total = self.index.ntotal
+            logger.debug(f"🔍 DEBUG: DMN {self.node_id}: Added trace to index. Total indexed: {current_total}")
+            
+            # Verify we can search for what we just added
+            if current_total > 0:
+                similarities, found_ids = self.index.search(content_np, 1)
+                if len(found_ids[0]) > 0 and found_ids[0][0] == faiss_id:
+                    logger.debug(f"✅ DMN {self.node_id}: Successfully verified trace {trace.trace_id} in index")
+                else:
+                    logger.warning(f"⚠️ DMN {self.node_id}: Could not verify trace {trace.trace_id} in index immediately after adding")
+                    
         except Exception as e:
-            logger.error(f"DMN {self.node_id}: Failed to add trace to FAISS index: {e}")
-            # Don't fail the entire operation if indexing fails
-            pass
+            logger.error(f"❌ DMN {self.node_id}: Failed to add trace to FAISS index: {e}")
+            # Don't fail the entire operation if indexing fails, but log it prominently
+            logger.error(f"❌ DMN {self.node_id}: FAISS indexing failed")
 
     async def _intelligent_eviction_async(self):
-        """Intelligent memory eviction using multiple criteria (ENHANCED with temporal factors)"""
+        
         if not self.memory_traces:
             return
 
