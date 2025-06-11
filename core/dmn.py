@@ -6,7 +6,6 @@ import numpy as np
 import logging
 import time
 from typing import Dict, Optional
-from core.dynamics import create_integrated_dynamics
 
 logger = logging.getLogger(__name__)
 
@@ -35,25 +34,33 @@ class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
         self._dynamics_initialized = False
 
     async def _init_biological_mechanisms(self):
-        try:
-            # Global import 'from core.dynamics import create_integrated_dynamics' is now used.
-            dynamics_config = self.config.copy()
-            dynamics_config.update({
-                'max_synapses': self.capacity * 2, # Assuming self.capacity holds a relevant value
-                'dimension': self.dimension,
-                'device': self.device,
-                'node_id': self.node_id
-            })
+        """Enhanced biological mechanisms with GPU dynamics"""
 
-            self.dynamics_engine = create_integrated_dynamics(dynamics_config)
-            await self.dynamics_engine.start()
+        # Initialize parent biological mechanisms (BTSP, etc.)
+        await super()._init_biological_mechanisms()
 
-            logger.info(f"DMN {self.node_id}: GPU dynamics enabled")
-            self._dynamics_initialized = True
-        except Exception as e:
-            logger.warning(f"DMN {self.node_id}: GPU dynamics failed, continuing without: {e}")
-            self.dynamics_engine = None
-            self._dynamics_initialized = False
+        # NEW: Initialize GPU dynamics engine
+        if not self._dynamics_initialized:
+            try:
+                from core.dynamics import create_integrated_dynamics
+
+                dynamics_config = self.config.copy()
+                dynamics_config.update({
+                    'max_synapses': self.capacity * 2,  # Allow overhead
+                    'dimension': self.dimension,
+                    'device': self.device,
+                    'node_id': self.node_id
+                })
+
+                self.dynamics_engine = create_integrated_dynamics(dynamics_config)
+                await self.dynamics_engine.start()
+
+                self._dynamics_initialized = True
+                logger.info(f"DMN {self.node_id}: GPU dynamics engine initialized")
+
+            except Exception as e:
+                logger.error(f"DMN {self.node_id}: Failed to initialize GPU dynamics: {e}")
+                self.dynamics_engine = None
 
     def _init_indexing_system(self):
         """GPU-accelerated FAISS indexing system"""
