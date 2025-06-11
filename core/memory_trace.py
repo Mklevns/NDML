@@ -204,39 +204,6 @@ class MemoryTrace:
             'created_at': time.time()
         }
 
-    def update_temporal_state(self, temporal_context: Dict[str, Any]):
-        """Update temporal state from external temporal engine."""
-        if self.temporal_metadata is None:
-            self.temporal_metadata = TemporalMetadata()
-        
-        # Update temporal coherence
-        self.temporal_metadata.temporal_coherence = temporal_context.get('temporal_coherence', 1.0)
-        
-        # Update other temporal metadata
-        self.temporal_metadata.last_consolidation = time.time()
-
-    def get_temporal_age_category(self) -> str:
-        """Get temporal age category based on trace age."""
-        age = time.time() - self.timestamp
-        
-        if age < 5:  # 5 seconds
-            return 'fast_synaptic'
-        elif age < 60:  # 1 minute
-            return 'calcium_plasticity'
-        elif age < 3600:  # 1 hour
-            return 'protein_synthesis'
-        elif age < 86400:  # 1 day
-            return 'homeostatic_scaling'
-        else:
-            return 'systems_consolidation'
-
-    def should_consolidate(self, threshold: float = 0.7) -> bool:
-        """Check if trace should be consolidated."""
-        if self.temporal_metadata is None:
-            return False
-        return (self.salience >= threshold and 
-                self.temporal_metadata.consolidation_state == ConsolidationState.INITIAL)
-
     def get_temporal_priority(self) -> float:
         """Get temporal priority for this trace."""
         if self.temporal_metadata is None:
@@ -357,23 +324,6 @@ class MemoryTrace:
         
         return base_priority * age_weight * consolidation_weight + access_weight
     
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any], device: str = "cpu") -> 'MemoryTrace':
-        """Deserialize from dictionary"""
-        # Always create content on CPU first, then move to device if needed
-        content = torch.tensor(data['content'], device='cpu', dtype=torch.float32)
-        if device != 'cpu':
-            content = content.to(device)
-
-        trace = cls(
-            content=content,
-            context=data['context'],
-            timestamp=data['timestamp'],
-            last_access=data['last_access'],
-            salience=data['salience'],
-            trace_id=data['trace_id']
-        )
-
     @classmethod
     def from_dict(cls, data: Dict[str, Any], device: str = "cpu") -> 'MemoryTrace':
         """Deserialize from dictionary"""
