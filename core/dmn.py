@@ -307,25 +307,9 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
             try:
                 await self._add_to_index_async(trace) # Add to FAISS
 
-                # Add to memory_traces list and update trace_index dictionary
-                # self.memory_traces is List[MemoryTrace] as per typical DMNs, or Dict if trace_id is key
-                # self.trace_index is Dict[str, int] (trace_id to list index)
-                # Based on __init__ it's Dict[str, MemoryTrace] and Dict[str, str]
-                # For this new method: using self.memory_traces.append and trace_index as dict[id -> list_idx]
-                # THIS IS A CHANGE IN STRUCTURE. Needs __init__ update.
-                # For now, let's stick to the Dict[str, MemoryTrace] from previous __init__ to avoid breaking retrieve.
-                # The prompt implies self.memory_traces will be a list.
-                # "self.memory_traces.append(trace)"
-                # "self.trace_index[trace.trace_id] = len(self.memory_traces) - 1"
-                # This conflicts with recent __init__ update.
-                # Reconciling: The prompt's new method structure for memory_traces (list) and trace_index (dict id->idx)
-                # is more standard for DMNs where list order can matter and direct indexing is useful.
-                # Let's proceed with the prompt's new structure for add_memory_trace_async.
-                # The __init__ will need to be changed in the next step.
-
-                # Assuming self.memory_traces is List[MemoryTrace] and self.trace_index is Dict[str, int] for this method.
-                # This will require an __init__ update in a subsequent step.
-
+                # Add to memory_traces list and update trace_index dictionary.
+                # self.memory_traces is List[MemoryTrace].
+                # self.trace_index is Dict[str, int] (trace_id to list index).
                 self.memory_traces.append(trace)
                 self.trace_index[trace.trace_id] = len(self.memory_traces) - 1
 
@@ -426,7 +410,6 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
             self.faiss_id_to_trace_id.clear()
             self.next_faiss_id = 0
 
-            # Assuming self.memory_traces is a dict {trace_id: trace_object}
             if not hasattr(self, 'memory_traces') or not self.memory_traces:
                 logger.info(f"DMN {self.node_id}: No memory traces to add to the index. Index is empty.")
                 if self.index: self.index.reset()

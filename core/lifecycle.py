@@ -671,16 +671,12 @@ class MemoryLifecycleManager:
     async def save_state(self, filepath: str) -> bool:
         """Save lifecycle manager state to file."""
         try:
+            p = Path(filepath)
+            p.parent.mkdir(parents=True, exist_ok=True)
+
             state_data = {
                 'node_id': self.node_id,
-                'config': {
-                    'eviction_batch_size': self.config.eviction_batch_size,
-                    'consolidation_interval': self.config.consolidation_interval,
-                    'maintenance_interval': self.config.maintenance_interval,
-                    'age_thresholds': self.config.age_thresholds,
-                    'decay_params': self.config.decay_params,
-                    'consolidation_params': self.config.consolidation_params,
-                },
+                'config': self.config.__dict__,
                 'stats': self.stats,
                 'last_consolidation_time': self.last_consolidation_time,
                 'last_maintenance_time': self.last_maintenance_time,
@@ -688,16 +684,23 @@ class MemoryLifecycleManager:
                 'transition_history': list(self.transition_history),
             }
             
-            Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(filepath, 'w') as f:
+            with open(p, 'w') as f:
                 json.dump(state_data, f, indent=2, default=str)
             
             logger.info(f"Lifecycle manager state saved to {filepath}")
             return True
-            
+
+        except IOError as e:
+            logger.error(f"IOError saving lifecycle manager state to {filepath}: {e}")
+            return False
+        except TypeError as e:
+            logger.error(f"TypeError serializing lifecycle manager state for {filepath}: {e}")
+            return False
+        except json.JSONDecodeError as e: # This is more relevant for loading, but good practice
+            logger.error(f"JSONDecodeError with lifecycle manager state for {filepath}: {e}")
+            return False
         except Exception as e:
-            logger.error(f"Error saving lifecycle manager state: {e}")
+            logger.error(f"Unexpected error saving lifecycle manager state to {filepath}: {e}")
             return False
 
     async def load_state(self, filepath: str) -> bool:
