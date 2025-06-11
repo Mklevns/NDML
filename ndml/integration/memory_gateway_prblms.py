@@ -63,14 +63,14 @@ class MemoryGateway:
         class ConsensusStub:
             def __init__(self):
                 pass
-            
+
             async def propose_memory_update(self, trace_id, content_vector, metadata):
                 # Always return success for testing
                 return True
-            
+
             def get_stats(self):
                 return {"stub_consensus": True}
-        
+
         return ConsensusStub()
 
     def _default_config(self) -> Dict[str, Any]:
@@ -87,11 +87,11 @@ class MemoryGateway:
                 "context_weight": 0.3,
             },
             "btsp": {
-                "calcium_threshold": 0.7, 
-                "decay_rate": 0.95, 
-                "novelty_weight": 0.4, 
-                "importance_weight": 0.3, 
-                "error_weight": 0.3, 
+                "calcium_threshold": 0.7,
+                "decay_rate": 0.95,
+                "novelty_weight": 0.4,
+                "importance_weight": 0.3,
+                "error_weight": 0.3,
                 "learning_rate": 0.1
             }
         }
@@ -128,14 +128,14 @@ class MemoryGateway:
         try:
             if stat_name not in self.stats:
                 self.stats[stat_name] = 0
-            
+
             # Ensure the current value is an integer
             if not isinstance(self.stats[stat_name], int):
                 logger.warning(f"Stat '{stat_name}' was not an int (was {type(self.stats[stat_name])}), resetting to 0")
                 self.stats[stat_name] = 0
-            
+
             self.stats[stat_name] += increment
-            
+
         except Exception as e:
             logger.error(f"Error incrementing stat '{stat_name}': {e}")
             self.stats[stat_name] = increment  # Reset to the increment value
@@ -143,18 +143,18 @@ class MemoryGateway:
     def _ensure_stats_integrity(self):
         """Ensure all stats are the correct type."""
         expected_int_stats = ['total_queries', 'total_updates', 'cache_hits', 'consensus_operations']
-        
+
         for stat_name in expected_int_stats:
             if stat_name not in self.stats:
                 self.stats[stat_name] = 0
             elif not isinstance(self.stats[stat_name], int):
                 logger.warning(f"Fixing corrupted stat '{stat_name}': was {type(self.stats[stat_name])}, setting to 0")
                 self.stats[stat_name] = 0
-        
+
         # Ensure defaultdicts are properly initialized
         if not isinstance(self.stats.get('routing_decisions'), defaultdict):
             self.stats['routing_decisions'] = defaultdict(int)
-        
+
         if not isinstance(self.stats.get('cluster_utilization'), defaultdict):
             self.stats['cluster_utilization'] = defaultdict(float)
 
@@ -164,7 +164,7 @@ class MemoryGateway:
                                   k: int = None,
                                   diversity_weight: float = None) -> List[Tuple[Any, float]]:
         """Retrieve memories from distributed clusters with proper stats tracking."""
-        
+
         if k is None:
             k = self.config['retrieval']['default_k']
 
@@ -173,7 +173,7 @@ class MemoryGateway:
 
         # FIXED: Use safe increment for stats
         self._safe_increment_stat('total_queries')
-        
+
         # Ensure stats integrity
         self._ensure_stats_integrity()
 
@@ -204,7 +204,7 @@ class MemoryGateway:
             ]
 
             all_results.extend(weighted_results)
-            
+
             # FIXED: Use safe increment for routing decisions
             if 'routing_decisions' not in self.stats:
                 self.stats['routing_decisions'] = defaultdict(int)
@@ -223,10 +223,10 @@ class MemoryGateway:
                            salience: float,
                            user_feedback: Optional[Dict[str, Any]] = None) -> bool:
         """Add memory to the appropriate cluster with proper routing."""
-        
+
         # FIXED: Use safe increment instead of direct increment
         self._safe_increment_stat('total_updates')
-        
+
         # Ensure stats integrity before proceeding
         self._ensure_stats_integrity()
 
@@ -235,7 +235,7 @@ class MemoryGateway:
 
         # Route to appropriate cluster
         cluster_scores = await self.cluster_router.route_query_async(content, context)
-        
+
         # FIXED: Better cluster selection logic
         if self.cluster_router.config['strategy'] == 'round_robin':
             # For round-robin, select the cluster with highest score
@@ -243,17 +243,17 @@ class MemoryGateway:
         else:
             # For other strategies, use weighted random selection for better distribution
             import random
-            
+
             # Convert scores to probabilities
             total_score = sum(cluster_scores.values())
             if total_score > 0:
                 probabilities = {k: v/total_score for k, v in cluster_scores.items()}
-                
+
                 # Weighted random selection
                 rand_val = random.random()
                 cumulative = 0.0
                 best_cluster_idx = 0
-                
+
                 for cluster_idx, prob in probabilities.items():
                     cumulative += prob
                     if rand_val <= cumulative:
@@ -262,9 +262,9 @@ class MemoryGateway:
             else:
                 # Fallback to random selection
                 best_cluster_idx = random.randint(0, len(self.clusters) - 1)
-        
+
         best_cluster = self.clusters[best_cluster_idx]
-        
+
         logger.debug(f"🎯 Selected cluster {best_cluster_idx} for memory storage")
 
         success = False
@@ -472,20 +472,20 @@ class MemoryGateway:
 
     def debug_cluster_distribution(self) -> Dict[str, Any]:
         """Debug function to check memory distribution across clusters."""
-        
+
         distribution = {}
         total_memories = 0
-        
+
         for i, cluster in enumerate(self.clusters):
             cluster_memory_count = cluster.get_memory_count()
             total_memories += cluster_memory_count
-            
+
             distribution[f"cluster_{i}"] = {
                 "memory_count": cluster_memory_count,
                 "utilization": cluster.get_utilization(),
                 "specialization": cluster.specialization
             }
-            
+
             # Check individual nodes in cluster
             node_distribution = {}
             for j, node in enumerate(cluster.nodes):
@@ -496,12 +496,12 @@ class MemoryGateway:
                     "indexed": node_index_count,
                     "node_id": node.node_id
                 }
-            
+
             distribution[f"cluster_{i}"]["nodes"] = node_distribution
-        
+
         distribution["total_memories"] = total_memories
         distribution["routing_stats"] = self.cluster_router.get_stats()
-        
+
         return distribution
 
 
@@ -678,7 +678,7 @@ class ClusterRouter(nn.Module):
 
     async def route_query_async(self, query: torch.Tensor, context: Dict[str, Any]) -> Dict[int, float]:
         """Route query to clusters with proper round-robin and load balancing."""
-        
+
         with torch.no_grad():
             # Normalize query - ensure it's on CPU for consistent processing
             query_cpu = query.detach().cpu() if query.device.type != 'cpu' else query
@@ -692,31 +692,31 @@ class ClusterRouter(nn.Module):
             elif self.config['strategy'] == 'round_robin':
                 # FIXED: Proper round-robin implementation
                 cluster_scores = {}
-                
+
                 # All clusters get base score
                 base_score = 1.0 / self.num_clusters
                 for i in range(self.num_clusters):
                     cluster_scores[i] = base_score
-                
+
                 # Boost the current round-robin target
                 target_cluster = self.round_robin_counter % self.num_clusters
                 cluster_scores[target_cluster] = 1.0  # Give highest score to target
-                
+
                 # Increment counter for next time
                 self.round_robin_counter += 1
-                
+
                 logger.debug(f"🔄 Round-robin: targeting cluster {target_cluster}, counter={self.round_robin_counter}")
 
             elif self.config['strategy'] == 'load_based':
                 # FIXED: Implement basic load-based routing
                 cluster_scores = {}
-                
+
                 # For now, use round-robin as fallback for load-based
                 # In a full implementation, you'd check actual cluster loads
                 base_score = 1.0 / self.num_clusters
                 for i in range(self.num_clusters):
                     cluster_scores[i] = base_score
-                
+
                 # Simple load balancing: alternate clusters
                 target_cluster = self.round_robin_counter % self.num_clusters
                 cluster_scores[target_cluster] = 1.0
@@ -727,7 +727,7 @@ class ClusterRouter(nn.Module):
                 import random
                 cluster_scores = {}
                 target_cluster = random.randint(0, self.num_clusters - 1)
-                
+
                 for i in range(self.num_clusters):
                     if i == target_cluster:
                         cluster_scores[i] = 0.7  # Bias toward target
@@ -742,7 +742,7 @@ class ClusterRouter(nn.Module):
             'timestamp': time.time(),
             'strategy': self.config['strategy']
         })
-        
+
         # DEBUG: Log routing decisions
         logger.debug(f"🔍 DEBUG: Routing scores: {cluster_scores}")
 
@@ -808,19 +808,19 @@ class NodeSelector:
 
     async def select_nodes_for_query(self, query: torch.Tensor, context: Dict[str, Any]) -> List[EnhancedDistributedMemoryNode]:
         """Select nodes for query retrieval."""
-        
+
         # For retrieval, query ALL nodes to ensure we don't miss memories
         # This is more thorough than the original 50% selection
-        
+
         # For basic testing, select all nodes to ensure comprehensive search
         selected_nodes = self.nodes.copy()
-        
+
         # Update selection history for all nodes
         for node in selected_nodes:
             self.selection_history[id(node)] += 1
-        
+
         logger.debug(f"🔍 DEBUG: Selected {len(selected_nodes)} nodes for query")
-        
+
         return selected_nodes
 
     async def select_node_for_update(self, content: torch.Tensor,

@@ -9,7 +9,7 @@ import logging
 import time
 from collections import defaultdict
 
-from core.dmn import EnhancedDistributedMemoryNode
+from ..core import EnhancedDistributedMemoryNode # Corrected relative import
 
 logger = logging.getLogger(__name__)
 
