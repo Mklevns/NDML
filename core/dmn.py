@@ -5,8 +5,8 @@ import faiss
 import numpy as np
 import logging
 import time
-from typing import Dict, Optional
-from dataclasses import dataclass
+from typing import Dict, Optional, Any, List
+from dataclasses import dataclass, field
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -61,25 +61,41 @@ class SimpleBTSP:
 class MemoryTrace:
     trace_id: str
     content: torch.Tensor
-    context: Dict
+    context: Dict[str, Any]  # Make context more specific if possible, else Any
     salience: float
     timestamp: float
 
-    # Optional: Add an update_access_stats method if it's specific to MemoryTrace
-    # For now, keep it simple as per plan.
-    # The existing retrieve_memories_async calls trace.update_access_stats(...)
-    # This implies MemoryTrace objects should have this method.
-    # Let's add a placeholder for it.
-    def update_access_stats(self, current_time, context_relevant=False):
-        # Placeholder for updating access statistics like last_accessed_time, access_count
-        # This method is called in retrieve_memories_async
-        logger.debug(f"Trace {self.trace_id}: update_access_stats called at {current_time}. Context relevant: {context_relevant}")
-        # Actual implementation might involve:
-        # self.last_accessed_time = current_time
-        # self.access_count += 1
-        # if context_relevant:
-        #    self.context_relevant_accesses += 1
-        pass # Replace with actual logic if needed later
+    # New fields from user's method
+    last_access: float = 0.0 # Initialized by add_memory_trace_async with current_time
+    current_salience: float = 0.0 # Initialized by add_memory_trace_async with salience
+    creation_node: str = "" # Initialized by add_memory_trace_async
+    access_count: int = 0
+    successful_retrievals: int = 0 # Not explicitly set by new method, but good to have
+    context_matches: int = 0 # Not explicitly set by new method, but good to have
+    consolidation_level: float = 0.0
+    eviction_protection: bool = False
+
+    def __post_init__(self):
+        # Initialize last_access and current_salience if not set by constructor,
+        # though the new add_memory_trace_async sets them.
+        if self.last_access == 0.0: # Check if default, means not set by specific constructor
+            self.last_access = self.timestamp
+        if self.current_salience == 0.0 and self.salience != 0.0: # Check if default
+             self.current_salience = self.salience
+        if not self.creation_node: # if empty string
+            # This might be an issue if trace_id doesn't contain node_id or if node_id isn't easily accessible here
+            # For now, leave it, as add_memory_trace_async sets it.
+            pass
+
+
+    def update_access_stats(self, current_time: float, context_relevant: bool = False):
+        self.last_access = current_time
+        self.access_count += 1
+        if context_relevant:
+            self.context_matches += 1
+        # successful_retrievals would typically be incremented by the calling code after confirming retrieval was useful.
+        # current_salience might decay or be updated by other mechanisms, not covered here.
+        logger.debug(f"Trace {self.trace_id}: Accessed. Count: {self.access_count}, Last: {self.last_access}, ContextRelevant: {context_relevant}")
 
 class IntegratedMemoryNode:
     """Base class to replace missing EnhancedDistributedMemoryNode"""
@@ -150,9 +166,10 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
         # Initialize parent class
         super().__init__(node_id, dimension, capacity, specialization, device, config)
 
-        # Ensure memory_traces and trace_index are dictionaries for GPUAcceleratedDMN
-        self.memory_traces: Dict[str, MemoryTrace] = {}
-        self.trace_index: Dict[str, str] = {} # Maps trace_id to trace_id (as key for memory_traces)
+        # self.memory_traces is now a list of MemoryTrace objects
+        self.memory_traces: List[MemoryTrace] = []
+        # self.trace_index maps trace_id (str) to the list index (int)
+        self.trace_index: Dict[str, int] = {}
 
         # NEW: Initialize dynamics engine placeholder
         self.dynamics_engine: Optional['IntegratedMultiTimescaleDynamics'] = None
@@ -229,71 +246,143 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
             self._init_cpu_index(index_config)
             self.gpu_resources = None
 
-    async def add_memory_trace_async(self, content: torch.Tensor, context: Dict, salience: float, **kwargs) -> Optional[MemoryTrace]:
-        logger.debug(f"DMN {self.node_id}: add_memory_trace_async called. Content type: {type(content)}, Salience: {salience}")
-
-        # Initial BTSP Evaluation by calling the base class method
-        # The base class method IntegratedMemoryNode.add_memory_trace_async calls self.btsp.evaluate_async
-        update_decision = await super().add_memory_trace_async(content, context, salience, **kwargs)
-
-        if not update_decision:
-            logger.warning(f"DMN {self.node_id}: Failed to get update decision from base class for content.")
-            return None
-
-        if not update_decision.should_update:
-            logger.info(f"DMN {self.node_id}: Update not recommended by BTSP. Calcium: {update_decision.calcium_level:.4f}. Trace not stored.")
-            return None
-
-        logger.info(f"DMN {self.node_id}: BTSP recommends update. Calcium: {update_decision.calcium_level:.4f}. Proceeding with trace storage.")
-
-        # Trace Storage
-        trace_id = str(uuid.uuid4())
-        current_timestamp = time.time()
-        new_trace = MemoryTrace(
-            trace_id=trace_id,
-            content=content, # Store original content tensor
-            context=context,
-            salience=salience,
-            timestamp=current_timestamp
-        )
-
-        # self.memory_traces is expected to be a Dict[str, MemoryTrace] in GPUAcceleratedDMN.
-        if not hasattr(self, 'memory_traces') or not isinstance(self.memory_traces, dict):
-             logger.warning(f"DMN {self.node_id}: self.memory_traces is not a dict. Initializing. THIS SHOULD BE HANDLED IN __init__.")
-             self.memory_traces = {}
-
-        self.memory_traces[trace_id] = new_trace
-
-        # self.trace_index should map trace_id to trace_id to be compatible with retrieve_memories_async
-        # retrieve_memories_async uses: trace = self.memory_traces[self.trace_index[trace_id]]
-        if not hasattr(self, 'trace_index') or not isinstance(self.trace_index, dict):
-            logger.warning(f"DMN {self.node_id}: self.trace_index is not a dict. Initializing. THIS SHOULD BE HANDLED IN __init__.")
-            self.trace_index = {}
-        self.trace_index[new_trace.trace_id] = new_trace.trace_id # Map trace_id to itself
+    async def add_memory_trace_async(self, content: torch.Tensor, context: Dict[str, Any],
+                                   salience: float, user_feedback=None) -> Optional[MemoryTrace]:
+        """Complete memory storage with GPU dynamics integration"""
 
         try:
-            await self._add_to_index_async(new_trace) # Add to FAISS index
-            logger.info(f"DMN {self.node_id}: Successfully stored and indexed new trace {trace_id}.")
-        except Exception as e:
-            logger.error(f"DMN {self.node_id}: Failed to add trace {trace_id} to FAISS index: {e}", exc_info=True)
-            # Consider rollback or alternative handling for production
-            pass
+            # Validate input
+            if not isinstance(content, torch.Tensor):
+                content = torch.tensor(content, dtype=torch.float32)
+
+            if content.dim() != 1 or content.shape[0] != self.dimension:
+                logger.error(f"DMN {self.node_id}: Invalid content dimensions: {content.shape}")
+                return None
+
+            # Create trace with exact MemoryTrace signature
+            current_time = time.time()
+            # Generate a more robust trace_id
+            trace_id_payload = content.cpu().numpy().tobytes()
+            trace_id = f"{self.node_id}_{int(current_time * 1000)}_{hash(trace_id_payload) % 100000}"
 
 
-        # Dynamics Engine Processing
-        if hasattr(self, 'dynamics_engine') and self.dynamics_engine and self._dynamics_initialized:
+            trace = MemoryTrace(
+                content=content.clone().detach(), # Store a detached clone
+                context=context.copy(), # Store a copy of the context
+                timestamp=current_time,
+                last_access=current_time, # Set last_access on creation
+                salience=salience,
+                current_salience=salience, # Initialize current_salience
+                trace_id=trace_id,
+                creation_node=self.node_id, # Set creation_node
+                access_count=0, # Explicitly 0
+                successful_retrievals=0, # Explicitly 0
+                context_matches=0, # Explicitly 0
+                consolidation_level=0.0, # Explicitly 0.0
+                eviction_protection=False # Explicitly False
+            )
+
+            # BTSP evaluation - get calcium_level!
+            calcium_level = 1.0 # Default calcium level
+            should_store = True # Default to store
+
+            if self.btsp: # Check if BTSP mechanism exists
+                try:
+                    update_decision = await self.btsp.evaluate_async(
+                        content=content, # Pass original content
+                        context=context,
+                        existing_traces=list(self.memory_traces.values()) if isinstance(self.memory_traces, dict) else self.memory_traces, # Pass the list of current traces
+                        user_feedback=user_feedback
+                    )
+
+                    should_store = update_decision.should_update
+                    calcium_level = update_decision.calcium_level
+
+                    logger.debug(f"DMN {self.node_id}: BTSP decision: store={should_store}, calcium={calcium_level:.4f}")
+
+                except Exception as e:
+                    logger.warning(f"DMN {self.node_id}: BTSP evaluation failed: {e}, falling back to salience check.")
+                    # Fallback logic if BTSP fails
+                    should_store = salience > self.config.get('btsp_fallback_salience_threshold', 0.5)
+            else:
+                # Fallback logic if BTSP is not initialized
+                logger.warning(f"DMN {self.node_id}: BTSP not initialized, falling back to salience check.")
+                should_store = salience > self.config.get('btsp_fallback_salience_threshold', 0.5)
+
+
+            if not should_store:
+                logger.info(f"DMN {self.node_id}: Trace not stored based on BTSP/fallback. Calcium: {calcium_level:.4f}, Salience: {salience:.4f}")
+                return None
+
+            # Register with dynamics FIRST if dynamics engine is available and initialized
+            if hasattr(self, 'dynamics_engine') and self.dynamics_engine and self._dynamics_initialized:
+                try:
+                    success_register = self.dynamics_engine.register_trace(trace.trace_id)
+                    if not success_register: # Assuming register_trace returns boolean
+                        logger.warning(f"DMN {self.node_id}: Failed to register trace {trace.trace_id} with dynamics engine.")
+                except Exception as e:
+                    logger.error(f"DMN {self.node_id}: Dynamics engine register_trace for {trace.trace_id} failed: {e}", exc_info=True)
+
+            # Store in FAISS index and memory collections
             try:
-                self.dynamics_engine.register_trace(new_trace.trace_id)
-                await self.dynamics_engine.process_update_async(
-                    new_trace.content,
-                    new_trace.salience,
-                    update_decision.calcium_level
-                )
-                logger.info(f"DMN {self.node_id}: Processed trace {new_trace.trace_id} through dynamics engine.")
-            except Exception as e:
-                logger.error(f"DMN {self.node_id}: Error processing trace {new_trace.trace_id} with dynamics engine: {e}", exc_info=True)
+                await self._add_to_index_async(trace) # Add to FAISS
 
-        return new_trace
+                # Add to memory_traces list and update trace_index dictionary
+                # self.memory_traces is List[MemoryTrace] as per typical DMNs, or Dict if trace_id is key
+                # self.trace_index is Dict[str, int] (trace_id to list index)
+                # Based on __init__ it's Dict[str, MemoryTrace] and Dict[str, str]
+                # For this new method: using self.memory_traces.append and trace_index as dict[id -> list_idx]
+                # THIS IS A CHANGE IN STRUCTURE. Needs __init__ update.
+                # For now, let's stick to the Dict[str, MemoryTrace] from previous __init__ to avoid breaking retrieve.
+                # The prompt implies self.memory_traces will be a list.
+                # "self.memory_traces.append(trace)"
+                # "self.trace_index[trace.trace_id] = len(self.memory_traces) - 1"
+                # This conflicts with recent __init__ update.
+                # Reconciling: The prompt's new method structure for memory_traces (list) and trace_index (dict id->idx)
+                # is more standard for DMNs where list order can matter and direct indexing is useful.
+                # Let's proceed with the prompt's new structure for add_memory_trace_async.
+                # The __init__ will need to be changed in the next step.
+
+                # Assuming self.memory_traces is List[MemoryTrace] and self.trace_index is Dict[str, int] for this method.
+                # This will require an __init__ update in a subsequent step.
+                if not isinstance(self.memory_traces, list):
+                     logger.warning(f"DMN {self.node_id}: self.memory_traces is not a list as expected by new add_memory_trace_async. Re-initializing. THIS REQUIRES __init__ UPDATE.")
+                     self.memory_traces = []
+                     self.trace_index = {} # If memory_traces is a list, trace_index must map id to index
+
+                self.memory_traces.append(trace)
+                self.trace_index[trace.trace_id] = len(self.memory_traces) - 1
+
+                logger.debug(f"DMN {self.node_id}: Successfully stored trace {trace.trace_id} in local collections and FAISS. Total traces: {len(self.memory_traces)}")
+            except Exception as e:
+                logger.error(f"DMN {self.node_id}: Failed to store trace {trace.trace_id} in FAISS/collections: {e}", exc_info=True)
+                # Attempt to unregister from dynamics if registration happened and storage failed
+                if hasattr(self, 'dynamics_engine') and self.dynamics_engine and self._dynamics_initialized:
+                    try:
+                        self.dynamics_engine.unregister_trace(trace.trace_id)
+                        logger.info(f"DMN {self.node_id}: Unregistered trace {trace.trace_id} from dynamics due to storage failure.")
+                    except Exception as unreg_e:
+                        logger.error(f"DMN {self.node_id}: Failed to unregister trace {trace.trace_id} from dynamics after storage failure: {unreg_e}", exc_info=True)
+                raise e # Re-raise the storage exception
+
+            # Process through temporal dynamics if dynamics engine is available and initialized
+            if hasattr(self, 'dynamics_engine') and self.dynamics_engine and self._dynamics_initialized:
+                try:
+                    await self.dynamics_engine.process_update_async(
+                        content=trace.content, # Use content from the stored trace
+                        salience=trace.salience, # Use salience from the stored trace
+                        calcium_level=calcium_level
+                    )
+                    logger.debug(f"DMN {self.node_id}: Processed trace {trace.trace_id} through GPU dynamics engine.")
+                except Exception as e:
+                    logger.error(f"DMN {self.node_id}: GPU dynamics engine processing for trace {trace.trace_id} failed: {e}", exc_info=True)
+
+            self.stats['total_updates'] = self.stats.get('total_updates', 0) + 1 # Safely increment
+            return trace
+
+        except Exception as e:
+            logger.error(f"DMN {self.node_id}: Unhandled error in add_memory_trace_async: {e}", exc_info=True)
+            return None
 
     def _init_cpu_index(self, index_config):
         """Fallback CPU index initialization"""
@@ -372,9 +461,9 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
 
             logger.info(f"DMN {self.node_id}: Processing {len(self.memory_traces)} traces for re-indexing.")
 
-            for trace_id, trace in self.memory_traces.items():
+            for trace in self.memory_traces: # self.memory_traces is now a List[MemoryTrace]
                 if not hasattr(trace, 'content') or not isinstance(trace.content, torch.Tensor):
-                    logger.warning(f"DMN {self.node_id}: Trace {trace_id} has invalid or missing content, skipping.")
+                    logger.warning(f"DMN {self.node_id}: Trace {trace.trace_id} has invalid or missing content, skipping.")
                     continue
 
                 content_cpu = trace.content.detach().cpu()
@@ -398,7 +487,7 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
                 all_vectors.append(content_np)
 
                 faiss_id = self.next_faiss_id
-                self.faiss_id_to_trace_id[faiss_id] = trace_id
+                self.faiss_id_to_trace_id[faiss_id] = trace.trace_id # Use trace.trace_id here
                 all_faiss_ids.append(faiss_id)
                 self.next_faiss_id += 1
 
@@ -457,13 +546,22 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
                 continue
                 
             if faiss_id not in self.faiss_id_to_trace_id:
+                logger.warning(f"DMN {self.node_id}: FAISS ID {faiss_id} not found in faiss_id_to_trace_id map. Skipping.")
                 continue
                 
             trace_id = self.faiss_id_to_trace_id[faiss_id]
+
             if trace_id not in self.trace_index:
+                logger.warning(f"DMN {self.node_id}: Trace ID {trace_id} from FAISS (original FAISS ID: {faiss_id}) not found in trace_index. Skipping.")
                 continue
-                
-            trace = self.memory_traces[self.trace_index[trace_id]]
+
+            list_idx = self.trace_index[trace_id]
+
+            if not (0 <= list_idx < len(self.memory_traces)):
+                logger.warning(f"DMN {self.node_id}: Stale or invalid list index {list_idx} for trace_id {trace_id} (FAISS ID: {faiss_id}). Max index: {len(self.memory_traces)-1}. Skipping.")
+                continue
+
+            trace = self.memory_traces[list_idx]
             
             # Apply context filtering
             if context_filter and not self._matches_context_filter(trace, context_filter):
