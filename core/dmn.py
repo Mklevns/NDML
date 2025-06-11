@@ -158,6 +158,12 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
         self.dynamics_engine: Optional['IntegratedMultiTimescaleDynamics'] = None
         self._dynamics_initialized = False
 
+        # GPU/FAISS specific attributes
+        self.gpu_resources: Optional[faiss.StandardGpuResources] = None
+        self.index: Optional[faiss.Index] = None
+        self.next_faiss_id: int = 0
+        self.faiss_id_to_trace_id: Dict[int, str] = {}
+
     async def _init_biological_mechanisms(self):
         """Enhanced biological mechanisms with GPU dynamics"""
 
@@ -219,9 +225,6 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
             logger.info(f"DMN {self.node_id}: Using CPU FAISS")
             self._init_cpu_index(index_config)
             self.gpu_resources = None
-
-        self.next_faiss_id = 0
-        self.faiss_id_to_trace_id: Dict[int, str] = {}
 
     async def add_memory_trace_async(self, content: torch.Tensor, context: Dict, salience: float, **kwargs) -> Optional[MemoryTrace]:
         logger.debug(f"DMN {self.node_id}: add_memory_trace_async called. Content type: {type(content)}, Salience: {salience}")
