@@ -5,13 +5,13 @@ import numpy as np
 import time
 from typing import Dict, Any, List, Optional, Tuple
 import logging
-from core.dynamics import MultiTimescaleDynamicsEngine, TemporalState
-from core.memory_trace import MemoryTrace
+from ..core import MultiTimescaleDynamicsEngine, TimescaleSchedule as TemporalState # Corrected import and class name
+from ..core import MemoryTrace # Corrected import
 
 class TemporalLLMBridge:
     """Bridge between temporal dynamics and LLM integration."""
 
-    def __init__(self, temporal_engine: MultiTimescaleDynamicsEngine):
+    def __init__(self, temporal_engine: MultiTimescaleDynamicsEngine): # Updated class name
         self.temporal_engine = temporal_engine
         self.attention_modulation_enabled = True
         self.memory_formation_modulation_enabled = True
