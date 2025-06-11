@@ -9,7 +9,101 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
+
+class UpdateDecision:
+    """Update decision with calcium_level"""
+    def __init__(self, should_update, calcium_level, novelty, importance):
+        self.should_update = should_update
+        self.calcium_level = calcium_level  # This is what you needed!
+        self.novelty = novelty
+        self.importance = importance
+
+class SimpleBTSP:
+    """Simple BTSP that provides calcium_level"""
+
+    def __init__(self, config):
+        self.calcium_threshold = config.get('calcium_threshold', 0.7)
+        self.novelty_weight = config.get('novelty_weight', 0.4)
+
+    async def evaluate_async(self, content, context, existing_traces, user_feedback=None):
+        """Evaluate and return decision with calcium_level"""
+
+        # Calculate novelty
+        novelty = 1.0
+        if existing_traces:
+            similarities = []
+            for trace in existing_traces[-10:]:  # Check recent traces
+                try:
+                    sim = torch.cosine_similarity(content, trace.content, dim=0)
+                    similarities.append(sim.item())
+                except: # Broad except to catch any error during similarity calculation for a trace
+                    continue
+
+            if similarities:
+                max_sim = max(similarities)
+                novelty = 1.0 - max_sim
+
+        # Get importance from context
+        importance = context.get('importance', 0.5)
+        if isinstance(importance, str):
+            importance = {'high': 0.9, 'medium': 0.6, 'low': 0.3}.get(importance, 0.5)
+
+        # Calculate calcium level
+        calcium_level = novelty * self.novelty_weight + importance * (1 - self.novelty_weight)
+        should_update = calcium_level > self.calcium_threshold
+
+        return UpdateDecision(should_update, calcium_level, novelty, importance)
+
+class IntegratedMemoryNode:
+    """Base class to replace missing EnhancedDistributedMemoryNode"""
+
+    def __init__(self, node_id, dimension, capacity, specialization, device="cpu", config=None):
+        self.node_id = node_id
+        self.dimension = dimension
+        self.capacity = capacity
+        self.specialization = specialization
+        self.device = device
+        self.config = config or {}
+        self.memory_traces = [] # Note: GPUAcceleratedDMN might have a different structure for memory_traces
+        self.trace_index = {}   # Note: GPUAcceleratedDMN might have a different structure for trace_index
+        self.stats = {'total_updates': 0, 'total_retrievals': 0, 'evictions': 0, 'consolidations': 0}
+        self.btsp = None # Initialized in _init_biological_mechanisms
+
+    async def _init_biological_mechanisms(self):
+        """Initialize with simple BTSP"""
+        self.btsp = SimpleBTSP(self.config.get('btsp', {}))
+        # Note: GPUAcceleratedDMN's _init_biological_mechanisms calls super() then does more.
+
+    async def add_memory_trace_async(self, content, context, salience, **kwargs):
+        # This is a placeholder in the base class.
+        # It's expected to be overridden by subclasses or implemented later.
+        # For now, it needs to handle the parameters passed by the tests.
+        logger.info(f"Node {self.node_id}: add_memory_trace_async called in IntegratedMemoryNode (base). Content: {type(content)}, Context: {context}, Salience: {salience}, Kwargs: {kwargs}")
+
+        # To make it somewhat functional for the BTSP evaluation if called directly:
+        # We need a list of existing traces. self.memory_traces is a list.
+        # The BTSP needs trace objects with a 'content' attribute.
+        # This base implementation won't actually store anything yet.
+
+        if self.btsp:
+            # Create a dummy list of trace-like objects if memory_traces is empty for evaluation
+            # This part is speculative as we don't know the exact trace object structure yet
+            # For now, let's assume self.memory_traces contains objects with a .content attribute
+            update_decision = await self.btsp.evaluate_async(content, context, self.memory_traces)
+            logger.info(f"Node {self.node_id}: BTSP evaluation in base add_memory_trace_async. Update: {update_decision.should_update}, Calcium: {update_decision.calcium_level:.4f}")
+
+            # This placeholder does not store the trace or return a meaningful result related to storage.
+            # It just demonstrates calling BTSP.
+            # Return value might need to be the trace object or a success status.
+            # For now, return the decision object, which might be useful for the subclass.
+            return update_decision
+        else:
+            logger.warning(f"Node {self.node_id}: BTSP not initialized in IntegratedMemoryNode. Cannot evaluate memory trace.")
+            # Return a default UpdateDecision or None if BTSP is not available
+            return UpdateDecision(False, 0.0, 0.0, 0.0) # Default decision
+
+
+class GPUAcceleratedDMN(IntegratedMemoryNode):
     """Enhanced DMN with GPU acceleration for FAISS and vector operations"""
     
     def __init__(self, node_id: str, dimension: int, capacity: int = 10000,
