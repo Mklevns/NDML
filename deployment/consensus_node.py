@@ -1,4 +1,5 @@
 # deployment/consensus_node.py
+import torch
 import asyncio
 import aiohttp
 import json
