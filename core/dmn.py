@@ -6,6 +6,8 @@ import numpy as np
 import logging
 import time
 from typing import Dict, Optional
+from dataclasses import dataclass
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,31 @@ class SimpleBTSP:
         should_update = calcium_level > self.calcium_threshold
 
         return UpdateDecision(should_update, calcium_level, novelty, importance)
+
+
+@dataclass
+class MemoryTrace:
+    trace_id: str
+    content: torch.Tensor
+    context: Dict
+    salience: float
+    timestamp: float
+
+    # Optional: Add an update_access_stats method if it's specific to MemoryTrace
+    # For now, keep it simple as per plan.
+    # The existing retrieve_memories_async calls trace.update_access_stats(...)
+    # This implies MemoryTrace objects should have this method.
+    # Let's add a placeholder for it.
+    def update_access_stats(self, current_time, context_relevant=False):
+        # Placeholder for updating access statistics like last_accessed_time, access_count
+        # This method is called in retrieve_memories_async
+        logger.debug(f"Trace {self.trace_id}: update_access_stats called at {current_time}. Context relevant: {context_relevant}")
+        # Actual implementation might involve:
+        # self.last_accessed_time = current_time
+        # self.access_count += 1
+        # if context_relevant:
+        #    self.context_relevant_accesses += 1
+        pass # Replace with actual logic if needed later
 
 class IntegratedMemoryNode:
     """Base class to replace missing EnhancedDistributedMemoryNode"""
@@ -123,6 +150,10 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
         # Initialize parent class
         super().__init__(node_id, dimension, capacity, specialization, device, config)
 
+        # Ensure memory_traces and trace_index are dictionaries for GPUAcceleratedDMN
+        self.memory_traces: Dict[str, MemoryTrace] = {}
+        self.trace_index: Dict[str, str] = {} # Maps trace_id to trace_id (as key for memory_traces)
+
         # NEW: Initialize dynamics engine placeholder
         self.dynamics_engine: Optional['IntegratedMultiTimescaleDynamics'] = None
         self._dynamics_initialized = False
@@ -191,6 +222,72 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
 
         self.next_faiss_id = 0
         self.faiss_id_to_trace_id: Dict[int, str] = {}
+
+    async def add_memory_trace_async(self, content: torch.Tensor, context: Dict, salience: float, **kwargs) -> Optional[MemoryTrace]:
+        logger.debug(f"DMN {self.node_id}: add_memory_trace_async called. Content type: {type(content)}, Salience: {salience}")
+
+        # Initial BTSP Evaluation by calling the base class method
+        # The base class method IntegratedMemoryNode.add_memory_trace_async calls self.btsp.evaluate_async
+        update_decision = await super().add_memory_trace_async(content, context, salience, **kwargs)
+
+        if not update_decision:
+            logger.warning(f"DMN {self.node_id}: Failed to get update decision from base class for content.")
+            return None
+
+        if not update_decision.should_update:
+            logger.info(f"DMN {self.node_id}: Update not recommended by BTSP. Calcium: {update_decision.calcium_level:.4f}. Trace not stored.")
+            return None
+
+        logger.info(f"DMN {self.node_id}: BTSP recommends update. Calcium: {update_decision.calcium_level:.4f}. Proceeding with trace storage.")
+
+        # Trace Storage
+        trace_id = str(uuid.uuid4())
+        current_timestamp = time.time()
+        new_trace = MemoryTrace(
+            trace_id=trace_id,
+            content=content, # Store original content tensor
+            context=context,
+            salience=salience,
+            timestamp=current_timestamp
+        )
+
+        # self.memory_traces is expected to be a Dict[str, MemoryTrace] in GPUAcceleratedDMN.
+        if not hasattr(self, 'memory_traces') or not isinstance(self.memory_traces, dict):
+             logger.warning(f"DMN {self.node_id}: self.memory_traces is not a dict. Initializing. THIS SHOULD BE HANDLED IN __init__.")
+             self.memory_traces = {}
+
+        self.memory_traces[trace_id] = new_trace
+
+        # self.trace_index should map trace_id to trace_id to be compatible with retrieve_memories_async
+        # retrieve_memories_async uses: trace = self.memory_traces[self.trace_index[trace_id]]
+        if not hasattr(self, 'trace_index') or not isinstance(self.trace_index, dict):
+            logger.warning(f"DMN {self.node_id}: self.trace_index is not a dict. Initializing. THIS SHOULD BE HANDLED IN __init__.")
+            self.trace_index = {}
+        self.trace_index[new_trace.trace_id] = new_trace.trace_id # Map trace_id to itself
+
+        try:
+            await self._add_to_index_async(new_trace) # Add to FAISS index
+            logger.info(f"DMN {self.node_id}: Successfully stored and indexed new trace {trace_id}.")
+        except Exception as e:
+            logger.error(f"DMN {self.node_id}: Failed to add trace {trace_id} to FAISS index: {e}", exc_info=True)
+            # Consider rollback or alternative handling for production
+            pass
+
+
+        # Dynamics Engine Processing
+        if hasattr(self, 'dynamics_engine') and self.dynamics_engine and self._dynamics_initialized:
+            try:
+                self.dynamics_engine.register_trace(new_trace.trace_id)
+                await self.dynamics_engine.process_update_async(
+                    new_trace.content,
+                    new_trace.salience,
+                    update_decision.calcium_level
+                )
+                logger.info(f"DMN {self.node_id}: Processed trace {new_trace.trace_id} through dynamics engine.")
+            except Exception as e:
+                logger.error(f"DMN {self.node_id}: Error processing trace {new_trace.trace_id} with dynamics engine: {e}", exc_info=True)
+
+        return new_trace
 
     def _init_cpu_index(self, index_config):
         """Fallback CPU index initialization"""
