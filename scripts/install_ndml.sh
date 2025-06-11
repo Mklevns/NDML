@@ -60,6 +60,9 @@ install_python_deps() {
     # Install core dependencies
     pip install -r requirements.txt
 
+    # Install the package in editable mode
+    pip install -e .
+
     # Install FAISS
     if [ "$cuda_available" = true ]; then
         pip install faiss-gpu

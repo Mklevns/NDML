@@ -26,6 +26,17 @@ logging.basicConfig( # logging is used by new _load_config (via logger)
 
 logger = logging.getLogger(__name__)
 
+from ndml.core.dmn import EnhancedDistributedMemoryNode
+from ndml.core.memory_trace import MemoryTrace
+from ndml.core.btsp import BTSPUpdateMechanism
+from ndml.core.dynamics import MultiTimescaleDynamicsEngine
+from ndml.core.lifecycle import MemoryLifecycleManager
+# Assuming LifecycleConfig and MemoryLifecycleState are also needed from lifecycle for tests
+from ndml.core.lifecycle import LifecycleConfig, MemoryLifecycleState
+from ndml.integration.memory_gateway import MemoryGateway
+from ndml.integration.fusion_network import MemoryFusionNetwork
+from ndml.integration.temporal_bridge import TemporalLLMBridge
+
 # ============================================================================
 # DEVICE UTILITY FUNCTIONS - ADD THESE AFTER IMPORTS, BEFORE OTHER FUNCTIONS
 # ============================================================================
@@ -57,189 +68,6 @@ def normalize_for_faiss(tensor: torch.Tensor) -> np.ndarray:
 # EXISTING FUNCTIONS CONTINUE BELOW
 # ========================================================================
 
-# Import NDML components with fallbacks for missing modules
-def import_with_fallback():
-    """Import NDML components with fallbacks for missing modules."""
-    components = {}
-
-    try:
-        # Try to import core components
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-        # Import existing modules
-        from core.dmn import EnhancedDistributedMemoryNode                    # ← needs "core."
-        from core.memory_trace import MemoryTrace                             # ← needs "core."
-        from core.btsp import BTSPUpdateMechanism                            # ← needs "core."
-        from core.dynamics import MultiTimescaleDynamicsEngine               # ← needs "core."
-        from core.lifecycle import MemoryLifecycleManager                    # ← needs "core."
-        from integration.memory_gateway import MemoryGateway                 # ← needs "integration."
-        from integration.fusion_network import MemoryFusionNetwork
-
-        components['dmn'] = EnhancedDistributedMemoryNode
-        components['memory_trace'] = MemoryTrace
-        components['btsp'] = BTSPUpdateMechanism
-        components['dynamics'] = MultiTimescaleDynamicsEngine
-        components['lifecycle'] = MemoryLifecycleManager
-        components['memory_gateway'] = MemoryGateway
-        components['fusion_network'] = MemoryFusionNetwork
-
-        return components
-        logger.info("Successfully imported core NDML components")
-
-    except ImportError as e:
-        logger.error(f"Failed to import core components: {e}")
-        raise
-
-    '''# Try to import optional components with fallbacks
-    try:
-        from llm_wrapper import NDMLIntegratedLLM
-        components['llm_wrapper'] = NDMLIntegratedLLM
-    except ImportError:
-        logger.warning("LLM wrapper not available - creating fallback")
-        components['llm_wrapper'] = None
-
-    # Create stubs for missing components
-    if 'lifecycle' not in components:
-        components['lifecycle'] = create_lifecycle_stub()
-
-    if 'dynamics' not in components:
-        components['dynamics'] = create_dynamics_stub()
-
-    if 'btsp' not in components:
-        components['btsp'] = create_btsp_stub()
-
-    if 'fusion_network' not in components:
-        components['fusion_network'] = create_fusion_stub()
-
-    if 'temporal_bridge' not in components:
-        components['temporal_bridge'] = create_temporal_stub()
-
-    return components'''
-
-def create_lifecycle_stub():
-    """Create a stub for MemoryLifecycleManager."""
-    class LifecycleConfig:
-        def __init__(self, eviction_batch_size=10, consolidation_interval=60.0, maintenance_interval=30.0):
-            self.eviction_batch_size = eviction_batch_size
-            self.consolidation_interval = consolidation_interval
-            self.maintenance_interval = maintenance_interval
-
-    class MemoryLifecycleManager:
-        def __init__(self, node_id, config=None):
-            self.node_id = node_id
-            self.config = config or LifecycleConfig()
-            logger.info(f"Lifecycle manager stub created for {node_id}")
-
-        async def evaluate_trace_lifecycle(self, trace, current_time):
-            from enum import Enum
-            class LifecycleState(Enum):
-                ACTIVE = "active"
-                CONSOLIDATING = "consolidating"
-                EVICTION_CANDIDATE = "eviction_candidate"
-            return LifecycleState.ACTIVE
-
-        async def select_eviction_candidates(self, traces, num_to_evict=5):
-            return traces[:min(num_to_evict, len(traces))]
-
-        async def perform_maintenance_cycle(self, traces):
-            return {"maintenance_performed": True, "traces_processed": len(traces)}
-
-        def get_lifecycle_statistics(self):
-            return {"stub_lifecycle_manager": True}
-
-    return {"LifecycleConfig": LifecycleConfig, "MemoryLifecycleManager": MemoryLifecycleManager}
-
-def create_dynamics_stub():
-    """Create a stub for MultiTimescaleDynamicsEngine."""
-    class MultiTimescaleDynamicsEngine:
-        def __init__(self, config=None, **kwargs):
-            self.config = config or {}
-            logger.info("Dynamics engine stub created")
-
-        async def start(self):
-            logger.info("Dynamics engine stub started")
-
-        async def stop(self):
-            logger.info("Dynamics engine stub stopped")
-
-        async def inject_event(self, event_type, timescale, params):
-            return True
-
-        async def step(self):
-            class StepResult:
-                def __init__(self):
-                    self.coherence_metric = 0.8
-            return StepResult()
-
-        def get_temporal_state(self):
-            return {"stub_temporal_state": True}
-
-        @property
-        def performance_monitor(self):
-            class PerfMonitor:
-                def get_performance_summary(self):
-                    return {"system_health": 0.8, "stub_performance": True}
-            return PerfMonitor()
-
-    return MultiTimescaleDynamicsEngine
-
-def create_btsp_stub():
-    """Create a stub for BTSPUpdateMechanism."""
-    class BTSPUpdateMechanism:
-        def __init__(self, **kwargs):
-            logger.info("BTSP mechanism stub created")
-
-        async def should_update_async(self, input_state, existing_traces, context, user_feedback=None):
-            class UpdateDecision:
-                def __init__(self):
-                    self.should_update = True
-                    self.calcium_level = 0.8
-                    self.learning_rate = 0.1
-            return UpdateDecision()
-
-        def get_stats(self):
-            return {"stub_btsp": True}
-
-    return BTSPUpdateMechanism
-
-def create_fusion_stub():
-    """Create a stub for MemoryFusionNetwork."""
-    class MemoryFusionNetwork:
-        def __init__(self, model_dimension, memory_dimension, **kwargs):
-            self.model_dimension = model_dimension
-            self.memory_dimension = memory_dimension
-            logger.info(f"Fusion network stub created: {model_dimension}D -> {memory_dimension}D")
-
-        def __call__(self, query_states, memory_embeddings):
-            batch_size = query_states.shape[0]
-            return {
-                'fused_states': torch.randn(batch_size, self.model_dimension),
-                'attention_weights': torch.softmax(torch.randn(batch_size, memory_embeddings.shape[1]), dim=1),
-                'confidence': torch.rand(batch_size, 1),
-                'fusion_metadata': {"stub_fusion": True}
-            }
-
-        def get_fusion_stats(self):
-            return {"fusion_time": 0.01, "stub_fusion_network": True}
-
-    return MemoryFusionNetwork
-
-def create_temporal_stub():
-    """Create a stub for TemporalLLMBridge."""
-    class TemporalLLMBridge:
-        def __init__(self, temporal_engine):
-            self.temporal_engine = temporal_engine
-            logger.info("Temporal bridge stub created")
-
-        async def process_llm_token_sequence(self, token_embeddings, context_length):
-            return {
-                'temporal_state': {"stub_temporal_bridge": True},
-                'enhanced_embeddings': token_embeddings
-            }
-
-    return TemporalLLMBridge
-
-
 class NDMLSystemManager:
     """
     Main system manager for the NDML (Neuromorphic Distributed Memory Layer).
@@ -256,9 +84,6 @@ class NDMLSystemManager:
         self.components = {}
         self.is_running = False
         self.test_results = {}
-
-        # Import components
-        self.imported_components = import_with_fallback()
 
         logger.info("NDML System Manager initialized")
 
@@ -364,15 +189,14 @@ class NDMLSystemManager:
             # 1. Initialize Temporal Dynamics Engine
             if self.config['temporal']['enabled']:
                 logger.info("Initializing Multi-Timescale Dynamics Engine...")
-                DynamicsEngine = self.imported_components['dynamics']
-                self.components['temporal_engine'] = DynamicsEngine(
+                self.components['temporal_engine'] = MultiTimescaleDynamicsEngine(
                     config=self.config['temporal']
                 )
                 await self.components['temporal_engine'].start()
 
             # 2. Initialize Memory Gateway WITH FULL ERROR TRACKING
             logger.info("Initializing Memory Gateway...")
-            MemoryGateway = self.imported_components['memory_gateway']
+            # MemoryGateway class is now directly imported
 
             # DEBUG: Verify config structure
             logger.info("🔍 DEBUG: System config keys before MemoryGateway:")
@@ -384,7 +208,7 @@ class NDMLSystemManager:
             try:
                 logger.info("🔍 DEBUG: About to create MemoryGateway with full config...")
 
-                self.components['memory_gateway'] = MemoryGateway(
+                self.components['memory_gateway'] = MemoryGateway( # Use imported MemoryGateway directly
                     dimension=self.config['system']['dimension'],
                     num_clusters=self.config['system']['num_clusters'],
                     nodes_per_cluster=self.config['system']['nodes_per_cluster'],
@@ -422,8 +246,7 @@ class NDMLSystemManager:
             # 3. Initialize Fusion Network
             logger.info("Initializing Memory Fusion Network...")
             try:
-                FusionNetwork = self.imported_components['fusion_network']
-                self.components['fusion_network'] = FusionNetwork(
+                self.components['fusion_network'] = MemoryFusionNetwork( # Use imported MemoryFusionNetwork
                     model_dimension=768,  # Common LLM dimension
                     memory_dimension=self.config['system']['dimension'],
                     **self.config['fusion']
@@ -436,17 +259,14 @@ class NDMLSystemManager:
                 raise
 
             # 4. Initialize Temporal Bridge (if temporal engine is enabled)
-            if 'temporal_engine' in self.components:
+            if 'temporal_engine' in self.components: # Keep this check as temporal_engine is conditional
                 logger.info("Initializing Temporal-LLM Bridge...")
                 try:
-                    if 'temporal_bridge' in self.imported_components:
-                        TemporalBridge = self.imported_components['temporal_bridge']
-                        self.components['temporal_bridge'] = TemporalBridge(
-                            self.components['temporal_engine']
-                        )
-                        logger.info("✅ TemporalBridge created successfully!")
-                    else:
-                        logger.warning("⚠️ temporal_bridge not in imported_components, skipping")
+                    # TemporalLLMBridge is now directly imported
+                    self.components['temporal_bridge'] = TemporalLLMBridge(
+                        self.components['temporal_engine']
+                    )
+                    logger.info("✅ TemporalBridge created successfully!")
                 except Exception as e:
                     logger.error(f"❌ TemporalBridge creation failed: {type(e).__name__}: {e}")
                     logger.warning("⚠️ Continuing without temporal bridge")
@@ -526,7 +346,7 @@ class NDMLSystemManager:
             logger.info(f"🔍 DEBUG: Basic memory test using device: {device}")
 
             # Test memory trace creation
-            MemoryTrace = self.imported_components['memory_trace']
+            # MemoryTrace is now imported at the top of the file
             test_content = torch.randn(self.config['system']['dimension'], device=device)
             test_context = {'domain': 'test', 'task_type': 'storage_test'}
 
@@ -918,103 +738,23 @@ class NDMLSystemManager:
         try:
             results = {'success': True, 'details': {}, 'errors': []}
 
-            # Import lifecycle components with proper fallback handling
-            LifecycleConfig = None
-            MemoryLifecycleManager = None
-            MemoryLifecycleState = None
+            # LifecycleConfig, MemoryLifecycleManager, MemoryLifecycleState are now imported at the top.
+            # The local stubs/fallbacks below are no longer needed if imports are successful.
 
-            # Try direct import first
-            try:
-                from core.lifecycle import LifecycleConfig, MemoryLifecycleManager, MemoryLifecycleState
-            except ImportError:
-                # Try from imported_components
-                lifecycle_components = self.imported_components.get('lifecycle', {})
-                LifecycleConfig = lifecycle_components.get('LifecycleConfig')
-                MemoryLifecycleManager = lifecycle_components.get('MemoryLifecycleManager')
-                MemoryLifecycleState = lifecycle_components.get('MemoryLifecycleState')
-
-            # Create fallbacks if still missing
-            if not LifecycleConfig:
-                class LifecycleConfig:
-                    def __init__(self, **kwargs):
-                        self.eviction_batch_size = kwargs.get('eviction_batch_size', 50)
-                        self.consolidation_interval = kwargs.get('consolidation_interval', 3600.0)
-                        self.maintenance_interval = kwargs.get('maintenance_interval', 1800.0)
-                        # Store all kwargs
-                        for key, value in kwargs.items():
-                            setattr(self, key, value)
-
-            if not MemoryLifecycleState:
-                from enum import Enum
-                class MemoryLifecycleState(Enum):
-                    ACTIVE = "active"
-                    AGING = "aging"
-                    CONSOLIDATING = "consolidating"
-                    ARCHIVED = "archived"
-                    EVICTION_CANDIDATE = "eviction_candidate"
-
-            if not MemoryLifecycleManager:
-                class MemoryLifecycleManager:
-                    def __init__(self, node_id, config=None):
-                        self.node_id = node_id
-                        self.config = config
-
-                    async def evaluate_trace_lifecycle(self, trace, current_time):
-                        # Simple age-based evaluation
-                        age = current_time - trace.timestamp
-                        if age > 3600:  # 1 hour
-                            return MemoryLifecycleState.AGING
-                        return MemoryLifecycleState.ACTIVE
-
-                    async def select_eviction_candidates(self, traces, num_to_evict=5):
-                        # Sort by salience (lowest first) and return candidates
-                        sorted_traces = sorted(traces, key=lambda t: t.salience)
-                        return sorted_traces[:min(num_to_evict, len(traces))]
-
-                    async def perform_maintenance_cycle(self, traces):
-                        return {
-                            "cycle_start_time": time.time(),
-                            "traces_processed": len(traces),
-                            "transitions": {"active_to_aging": 5},
-                            "consolidation_updates": {},
-                            "cleanup_count": 0,
-                            "errors": [],
-                            "cycle_duration": 0.1
-                        }
-
-                    def get_lifecycle_statistics(self):
-                        return {
-                            "total_traces": 50,
-                            "state_counts": {"active": 40, "aging": 10},
-                            "eviction_stats": {"total_evicted": 0},
-                            "performance_metrics": {"maintenance_cycle_time": 0.1}
-                        }
-
-            # Create a test lifecycle manager
+            # Create a test lifecycle manager using the imported classes
             lifecycle_config = LifecycleConfig(
                 eviction_batch_size=10,
                 consolidation_interval=60.0,  # 1 minute for testing
                 maintenance_interval=30.0     # 30 seconds for testing
             )
 
-            lifecycle_manager = MemoryLifecycleManager(
+            lifecycle_manager = MemoryLifecycleManager( # Using imported MemoryLifecycleManager
                 node_id="test_node",
                 config=lifecycle_config
             )
 
-            # Get MemoryTrace class
-            MemoryTrace = self.imported_components.get('memory_trace')
-            if not MemoryTrace:
-            # Create a minimal MemoryTrace for testing
-                class MemoryTrace:
-                    def __init__(self, content, context, timestamp, salience):
-                        self.content = content
-                        self.context = context
-                        self.timestamp = timestamp
-                        self.salience = salience
-                        self.last_access = timestamp
-                        self.access_count = 0
-                        self.trace_id = f"trace_{hash(str(timestamp))}"
+            # MemoryTrace is imported at the top of the file.
+            # The fallback minimal MemoryTrace class definition is removed.
 
             # Create test memory traces
             test_traces = []
