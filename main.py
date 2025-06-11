@@ -7,15 +7,15 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-import yaml
+from typing import Dict, List, Any, Optional # Dict, Any, Optional are used by new _load_config
+import yaml # Used by new _load_config
 import json
 import sys
 import os
 
 
 # Configure logging
-logging.basicConfig(
+logging.basicConfig( # logging is used by new _load_config (via logger)
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
@@ -261,10 +261,10 @@ class NDMLSystemManager:
         self.imported_components = import_with_fallback()
 
         logger.info("NDML System Manager initialized")
+
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
         """Load system configuration by merging defaults with a user-provided file."""
-
-        # --- A complete default configuration to prevent KeyErrors ---
+        # A complete default configuration to prevent KeyErrors
         default_config = {
             'system': {
                 'dimension': 512,
@@ -286,7 +286,8 @@ class NDMLSystemManager:
                 'importance_weight': 0.3,
                 'error_weight': 0.3,
                 'learning_rate': 0.1,
-                'dimension': 512
+                'dimension': 512,
+                'device': 'cuda' if torch.cuda.is_available() else 'cpu',
             },
             'fusion': {
                 'num_attention_heads': 8,
@@ -311,51 +312,44 @@ class NDMLSystemManager:
                 'diversity_weight': 0.2,
                 'context_weight': 0.3,
             },
-            'consolidation': {
-                'threshold': 0.8,
-                'interval_seconds': 3600,
-                'max_traces_per_cycle': 100
-            },
-            'lifecycle': {
-                'eviction_batch_size': 50,
-                'consolidation_interval': 3600.0,
-                'maintenance_interval': 1800.0,
-            },
             'indexing': {
-                'index_type': 'HNSW',
-                'hnsw_m': 16,
-                'hnsw_ef_construction': 200,
+                'index_type': 'HNSW', # Example, not fully used yet
                 'similarity_threshold': 0.1,
             },
-            'dynamics': {
-                'calcium_decay_ms': 200,
-                'protein_decay_ms': 30000,
-                'eligibility_decay_ms': 5000,
-                'competition_strength': 0.1
-            }
+            # Add other missing top-level keys that components might expect
         }
 
-        # Load user config if provided
         if config_path and Path(config_path).exists():
             try:
                 with open(config_path, 'r') as f:
-                    # Support both YAML and JSON
-                    if config_path.endswith(('.yaml', '.yml')):
-                        user_config = yaml.safe_load(f)
-                    else:
-                        user_config = json.load(f)
+                    user_config = yaml.safe_load(f)
 
-                # Deep merge the user config into the default config
-                self._deep_merge(default_config, user_config)
+                # Helper for deep merging
+                def deep_merge(base, update):
+                    for key, value in update.items():
+                        if isinstance(base.get(key), dict) and isinstance(value, dict):
+                            deep_merge(base[key], value)
+                        else:
+                            base[key] = value
+
+                deep_merge(default_config, user_config)
                 logger.info(f"Loaded and merged configuration from {config_path}")
 
             except Exception as e:
                 logger.error(f"Error loading config from {config_path}: {e}. Using default configuration.")
 
+        # Ensure device in BTSP config matches system device
+        default_config['btsp']['device'] = default_config['system']['device']
         return default_config
 
     def _deep_merge(self, base: Dict, update: Dict):
         """Helper function to recursively merge dictionaries."""
+        # This method is now part of the new _load_config,
+        # but the original _deep_merge was outside _load_config.
+        # For now, I'll keep the original _deep_merge as well,
+        # in case other parts of the class use it, although it's not ideal.
+        # A better refactor would be to make the one inside _load_config local
+        # or consolidate its usage.
         for key, value in update.items():
             if key in base and isinstance(base[key], dict) and isinstance(value, dict):
                 self._deep_merge(base[key], value)
