@@ -585,9 +585,10 @@ class NDMLSystemManager:
             # Test basic retrieval with VERY similar query (high similarity expected)
             logger.info("🔍 DEBUG: Testing memory retrieval...")
 
-            # Create a query that's nearly identical to the stored content
-            noise_factor = 0.01  # Very small noise for high similarity
-            query_content = test_content + torch.randn_like(test_content) * noise_factor
+            # Create a query on the SAME device as the test content
+            device = self.config['system']['device']
+            noise_factor = 0.01
+            query_content = test_content + torch.randn_like(test_content, device=device) * noise_factor
 
             # Calculate expected similarity
             expected_similarity = F.cosine_similarity(
@@ -1181,33 +1182,39 @@ class NDMLSystemManager:
             storage_ops_per_sec = results['details']['storage_performance']['operations_per_second']
             retrieval_ops_per_sec = results['details']['retrieval_performance']['queries_per_second']
 
-            # CORRECTED: Define the threshold variables and use proper comparison
-            min_storage_rate = 20   # Lowered from 50 to 20 ops/sec
-            min_retrieval_rate = 25  # Lowered from 100 to 25 ops/sec
+            min_storage_rate = 20   # Minimum acceptable storage operations/second
+            min_retrieval_rate = 25  # Minimum acceptable retrieval operations/second
 
-            results['details']['performance_acceptable'] = (
-                storage_ops_per_sec > min_storage_rate and      # Use > not =
-                retrieval_ops_per_sec > min_retrieval_rate       # Use > not =
+            # Check if performance meets the minimum thresholds
+            is_acceptable = (
+                storage_ops_per_sec > min_storage_rate and
+                retrieval_ops_per_sec > min_retrieval_rate
             )
+            results['details']['performance_acceptable'] = is_acceptable
 
-            # Add threshold info to results for debugging
+            # Add threshold info to results for better debugging
             results['details']['performance_thresholds'] = {
-                'min_storage_rate': min_storage_rate,
-                'min_retrieval_rate': min_retrieval_rate,
-                'actual_storage_rate': storage_ops_per_sec,
-                'actual_retrieval_rate': retrieval_ops_per_sec
+                'min_storage_ops_per_sec': min_storage_rate,
+                'min_retrieval_ops_per_sec': min_retrieval_rate,
+                'actual_storage_ops_per_sec': storage_ops_per_sec,
+                'actual_retrieval_ops_per_sec': retrieval_ops_per_sec
             }
 
-            if not results['details']['performance_acceptable']:
+            if not is_acceptable:
                 results['success'] = False
-                results['errors'].append(
-                    f"Performance below threshold: storage={storage_ops_per_sec:.1f}/s "
-                    f"(min: {min_storage_rate}), retrieval={retrieval_ops_per_sec:.1f}/s "
-                    f"(min: {min_retrieval_rate})"
+                error_message = (
+                    f"Performance below threshold. "
+                    f"Storage: {storage_ops_per_sec:.1f} ops/s (min: {min_storage_rate}). "
+                    f"Retrieval: {retrieval_ops_per_sec:.1f} ops/s (min: {min_retrieval_rate})."
                 )
+                results['errors'].append(error_message)
+                logger.warning(error_message)
             else:
-                logger.info(f"✅ Performance test passed: storage={storage_ops_per_sec:.1f}/s, "
-                        f"retrieval={retrieval_ops_per_sec:.1f}/s")
+                logger.info(
+                    f"✅ Performance test passed: "
+                    f"Storage={storage_ops_per_sec:.1f}/s, "
+                    f"Retrieval={retrieval_ops_per_sec:.1f}/s"
+                )
 
             return results
 
