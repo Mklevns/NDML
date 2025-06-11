@@ -4,6 +4,7 @@ import torch
 import faiss
 import numpy as np
 import logging
+import time
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -40,13 +41,9 @@ class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
                 self.gpu_resources = faiss.StandardGpuResources()
                 
                 # Start with CPU index, then move to GPU
-                if index_config.get('index_type') == 'HNSW':
-                    logger.info(f"DMN {self.node_id}: Creating HNSW index...")
-                    cpu_index = faiss.IndexHNSWFlat(self.dimension, index_config['hnsw_m'])
-                    cpu_index.hnsw.efConstruction = index_config['hnsw_ef_construction']
-                else:
-                    logger.info(f"DMN {self.node_id}: Creating Flat index...")
-                    cpu_index = faiss.IndexFlatIP(self.dimension)
+                # Temporarily forcing IndexFlatIP for GPU per subtask instructions
+                logger.info(f"DMN {self.node_id}: Forcing IndexFlatIP for GPU.")
+                cpu_index = faiss.IndexFlatIP(self.dimension)
                 
                 # Add ID mapping
                 cpu_index_with_ids = faiss.IndexIDMap(cpu_index)
@@ -106,6 +103,92 @@ class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
         except Exception as e:
             logger.error(f"DMN {self.node_id}: Failed to add to index: {e}")
 
+    async def _rebuild_faiss_index(self):
+        """Rebuilds the FAISS index from scratch using all traces in memory."""
+        logger.info(f"DMN {self.node_id}: Starting FAISS index rebuild.")
+        try:
+            # Resetting the index and associated mappings
+            logger.info(f"DMN {self.node_id}: Clearing existing FAISS index and mappings.")
+            # Re-initialize index to ensure it's clean and to handle potential GPU resource re-creation
+            # This logic is similar to _init_indexing_system but simplified for rebuild
+            index_config = self.config.get('indexing', {})
+            if self.use_gpu and hasattr(faiss, 'StandardGpuResources'):
+                if not self.gpu_resources:
+                    logger.info(f"DMN {self.node_id}: Initializing GPU resources for rebuild.")
+                    self.gpu_resources = faiss.StandardGpuResources()
+
+                logger.info(f"DMN {self.node_id}: Rebuilding with IndexFlatIP for GPU.")
+                cpu_index = faiss.IndexFlatIP(self.dimension)
+                cpu_index_with_ids = faiss.IndexIDMap(cpu_index)
+                self.index = faiss.index_cpu_to_gpu(self.gpu_resources, 0, cpu_index_with_ids)
+                logger.info(f"DMN {self.node_id}: Re-initialized FAISS index on GPU (FlatIP).")
+            else:
+                # Fallback or CPU-only mode
+                base_index = faiss.IndexFlatIP(self.dimension)
+                self.index = faiss.IndexIDMap(base_index)
+                logger.info(f"DMN {self.node_id}: Re-initialized FAISS index on CPU (FlatIP).")
+
+            self.faiss_id_to_trace_id.clear()
+            self.next_faiss_id = 0
+
+            # Assuming self.memory_traces is a dict {trace_id: trace_object}
+            if not hasattr(self, 'memory_traces') or not self.memory_traces:
+                logger.info(f"DMN {self.node_id}: No memory traces to add to the index. Index is empty.")
+                if self.index: self.index.reset()
+                return
+
+            all_vectors = []
+            all_faiss_ids = []
+
+            logger.info(f"DMN {self.node_id}: Processing {len(self.memory_traces)} traces for re-indexing.")
+
+            for trace_id, trace in self.memory_traces.items():
+                if not hasattr(trace, 'content') or not isinstance(trace.content, torch.Tensor):
+                    logger.warning(f"DMN {self.node_id}: Trace {trace_id} has invalid or missing content, skipping.")
+                    continue
+
+                content_cpu = trace.content.detach().cpu()
+
+                # Ensure content is a 1D vector or can be treated as one.
+                if content_cpu.ndim == 0:
+                    logger.warning(f"DMN {self.node_id}: Trace {trace_id} content is a scalar, skipping.")
+                    continue
+                elif content_cpu.ndim > 1:
+                    # If content is (N, dim), take the first vector. Modify if other behavior is needed.
+                    logger.warning(f"DMN {self.node_id}: Trace {trace_id} content has shape {content_cpu.shape}. Using first vector.")
+                    content_cpu = content_cpu[0]
+                    if content_cpu.ndim == 0: # Check again if the first vector was scalar
+                         logger.warning(f"DMN {self.node_id}: First vector of trace {trace_id} content is scalar, skipping.")
+                         continue
+
+                # Normalize requires (N, dim), so unsqueeze if it's (dim)
+                content_normalized = torch.nn.functional.normalize(content_cpu.unsqueeze(0), dim=-1)
+                content_np = content_normalized.numpy().astype('float32') # Already (1, dim)
+
+                all_vectors.append(content_np)
+
+                faiss_id = self.next_faiss_id
+                self.faiss_id_to_trace_id[faiss_id] = trace_id
+                all_faiss_ids.append(faiss_id)
+                self.next_faiss_id += 1
+
+            if not all_vectors:
+                logger.info(f"DMN {self.node_id}: No valid vectors collected from traces. Index will be empty.")
+                if self.index: self.index.reset()
+                return
+
+            all_vectors_np = np.vstack(all_vectors)
+            all_faiss_ids_np = np.array(all_faiss_ids, dtype=np.int64)
+
+            self.index.add_with_ids(all_vectors_np, all_faiss_ids_np)
+
+            logger.info(f"DMN {self.node_id}: Successfully rebuilt FAISS index.")
+            logger.info(f"DMN {self.node_id}: Processed {len(all_vectors)} traces. Index ntotal: {self.index.ntotal if self.index else 'None'}.")
+
+        except Exception as e:
+            logger.error(f"DMN {self.node_id}: Error during FAISS index rebuild: {e}", exc_info=True)
+            logger.warning(f"DMN {self.node_id}: Index rebuild failed. Index might be in an inconsistent state.")
+
     async def retrieve_memories_async(self, query: torch.Tensor, k: int = 10, 
                                     context_filter=None, similarity_threshold=None, 
                                     temporal_context=None):
@@ -119,6 +202,7 @@ class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
     # Keep the query on the GPU
             query_gpu = query.to(self.device)
             query_normalized = torch.nn.functional.normalize(query_gpu, dim=-1)
+            logger.debug(f"DMN {self.node_id}: Query normalized. Shape: {query_normalized.shape}, Device: {query_normalized.device}")
             
             # Reshape for FAISS search
             query_tensor_gpu = query_normalized.reshape(1, -1)
@@ -126,6 +210,7 @@ class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
             # Perform search directly on the GPU
             # Note: faiss-gpu can take a torch tensor directly if it's contiguous
             similarities, faiss_ids = self.index.search(query_tensor_gpu, min(k * 2, self.index.ntotal))
+            logger.debug(f"DMN {self.node_id}: Raw FAISS search results - Similarities: {similarities[0][:5]}, FAISS IDs: {faiss_ids[0][:5]}")
             
             logger.debug(f"DMN {self.node_id}: {'GPU' if self.use_gpu else 'CPU'} search returned {len(similarities[0])} results")
             
@@ -134,6 +219,10 @@ class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
         current_time = time.time()
         
         for sim, faiss_id in zip(similarities[0], faiss_ids[0]):
+            logger.debug(f"DMN {self.node_id}: Processing FAISS ID {faiss_id} with similarity {sim:.4f}")
+            if not (-1.01 <= sim <= 1.01): # Check for IndexFlatIP, range is [-1, 1]
+                logger.warning(f"DMN {self.node_id}: Unusual similarity score {sim:.4f} for FAISS ID {faiss_id}. Expected range [-1, 1] for IP index with normalized vectors.")
+
             if sim < similarity_threshold:
                 continue
                 
@@ -162,6 +251,7 @@ class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
             if len(results) >= k:
                 break
         
+        logger.debug(f"DMN {self.node_id}: Found {len(results)} potential results after initial filtering (threshold, context, etc.) before final sorting and k-limiting.")
         results.sort(key=lambda x: x[1], reverse=True)
         
         self.stats['total_retrievals'] += 1
