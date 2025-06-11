@@ -29,7 +29,7 @@ class NeuromorphicConsensusLayer:
         # In a real implementation, this would involve network communication and consensus logic.
         return True
 
-    async def sync_with_peer(self, peer_id: str, peer_data: Dict):
+    async def sync_with_peer(self, peer_id: str, peer_data: Dict) -> None:
         logger.info(f"Syncing with peer {peer_id} (stub).")
         # Merge peer data (CRDT logic would be here)
 
