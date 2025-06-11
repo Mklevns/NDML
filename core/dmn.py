@@ -167,13 +167,16 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
     async def _init_biological_mechanisms(self):
         """Enhanced biological mechanisms with GPU dynamics"""
 
-        # Initialize parent biological mechanisms (BTSP, etc.)
+        # Initialize parent biological mechanisms (BTSP)
         await super()._init_biological_mechanisms()
 
-        # NEW: Initialize GPU dynamics engine
+        # Initialize FAISS indexing
+        self._init_indexing_system()
+
+        # Initialize GPU dynamics engine
         if not self._dynamics_initialized:
             try:
-                from core.dynamics import create_integrated_dynamics
+                from core.dynamics import create_integrated_dynamics # Local import
 
                 dynamics_config = self.config.copy()
                 dynamics_config.update({
@@ -187,10 +190,10 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
                 await self.dynamics_engine.start()
 
                 self._dynamics_initialized = True
-                logger.info(f"DMN {self.node_id}: GPU dynamics engine initialized")
+                logger.info(f"DMN {self.node_id}: ✅ GPU dynamics engine initialized")
 
             except Exception as e:
-                logger.error(f"DMN {self.node_id}: Failed to initialize GPU dynamics: {e}")
+                logger.error(f"DMN {self.node_id}: GPU dynamics initialization failed: {e}")
                 self.dynamics_engine = None
 
     def _init_indexing_system(self):
