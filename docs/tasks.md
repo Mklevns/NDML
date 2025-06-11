@@ -5,9 +5,9 @@ This document contains a comprehensive list of improvement tasks for the NDML (N
 ## Core System Implementation
 
 [ ] Implement missing core modules:
-   - [ ] Create core/btsp.py for the BTSPUpdateMechanism class
-   - [ ] Create core/lifecycle.py for the MemoryLifecycleManager class
-   - [ ] Create core/dynamics.py for the MultiTimescaleDynamicsEngine class
+   - [x] Create core/btsp.py for the BTSPUpdateMechanism class
+   - [x] Create core/lifecycle.py for the MemoryLifecycleManager class
+   - [x] Create core/dynamics.py for the MultiTimescaleDynamicsEngine class
 
 [ ] Fix import issues:
    - [ ] Add missing imports in memory_trace.py (List, hashlib)
