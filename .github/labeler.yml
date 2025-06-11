@@ -1,0 +1,14 @@
+# This will add labels to PRs based on the files modified
+
+# Add 'frontend' label to PRs modifying files in the frontend/ directory
+frontend:
+  - 'frontend/**'
+
+# Add 'backend' label to PRs modifying files in the backend/ directory
+backend:
+  - 'backend/**'
+
+# Add 'docs' label to PRs modifying documentation files
+docs:
+  - 'docs/**'
+  - '*.md'
