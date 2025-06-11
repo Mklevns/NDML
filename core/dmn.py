@@ -16,19 +16,23 @@ class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
     def __init__(self, node_id: str, dimension: int, capacity: int = 10000,
                  specialization: str = "general", device: str = "auto", 
                  config: Optional[Dict] = None):
-        
+
         # Auto-detect best device
         if device == "auto":
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
-            
+
         self.use_gpu = self.device == "cuda"
-        
+
         logger.info(f"DMN {node_id}: Initializing with device={self.device}, GPU={self.use_gpu}")
-        
+
         # Initialize parent class
         super().__init__(node_id, dimension, capacity, specialization, device, config)
+
+        # NEW: Initialize dynamics engine placeholder
+        self.dynamics_engine: Optional['IntegratedMultiTimescaleDynamics'] = None
+        self._dynamics_initialized = False
 
     async def _init_biological_mechanisms(self):
         try:
@@ -45,9 +49,11 @@ class GPUAcceleratedDMN(EnhancedDistributedMemoryNode):
             await self.dynamics_engine.start()
 
             logger.info(f"DMN {self.node_id}: GPU dynamics enabled")
+            self._dynamics_initialized = True
         except Exception as e:
             logger.warning(f"DMN {self.node_id}: GPU dynamics failed, continuing without: {e}")
             self.dynamics_engine = None
+            self._dynamics_initialized = False
 
     def _init_indexing_system(self):
         """GPU-accelerated FAISS indexing system"""
