@@ -9,7 +9,6 @@ from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field
 import uuid
 from typing import Dict, Optional
-from main import EnhancedDistributedMemoryNode
 import asyncio
 from typing import Optional, Any
 
@@ -43,7 +42,8 @@ class SimpleBTSP:
                 try:
                     sim = torch.cosine_similarity(content, trace.content, dim=0)
                     similarities.append(sim.item())
-                except: # Broad except to catch any error during similarity calculation for a trace
+                except Exception as e:
+                    logger.warning(f"Could not compute similarity for a trace: {e}")
                     continue
 
             if similarities:
@@ -123,32 +123,7 @@ class IntegratedMemoryNode:
         # Note: GPUAcceleratedDMN's _init_biological_mechanisms calls super() then does more.
 
     async def add_memory_trace_async(self, content, context, salience, **kwargs):
-        # This is a placeholder in the base class.
-        # It's expected to be overridden by subclasses or implemented later.
-        # For now, it needs to handle the parameters passed by the tests.
-        logger.info(f"Node {self.node_id}: add_memory_trace_async called in IntegratedMemoryNode (base). Content: {type(content)}, Context: {context}, Salience: {salience}, Kwargs: {kwargs}")
-
-        # To make it somewhat functional for the BTSP evaluation if called directly:
-        # We need a list of existing traces. self.memory_traces is a list.
-        # The BTSP needs trace objects with a 'content' attribute.
-        # This base implementation won't actually store anything yet.
-
-        if self.btsp:
-            # Create a dummy list of trace-like objects if memory_traces is empty for evaluation
-            # This part is speculative as we don't know the exact trace object structure yet
-            # For now, let's assume self.memory_traces contains objects with a .content attribute
-            update_decision = await self.btsp.evaluate_async(content, context, self.memory_traces)
-            logger.info(f"Node {self.node_id}: BTSP evaluation in base add_memory_trace_async. Update: {update_decision.should_update}, Calcium: {update_decision.calcium_level:.4f}")
-
-            # This placeholder does not store the trace or return a meaningful result related to storage.
-            # It just demonstrates calling BTSP.
-            # Return value might need to be the trace object or a success status.
-            # For now, return the decision object, which might be useful for the subclass.
-            return update_decision
-        else:
-            logger.warning(f"Node {self.node_id}: BTSP not initialized in IntegratedMemoryNode. Cannot evaluate memory trace.")
-            # Return a default UpdateDecision or None if BTSP is not available
-            return UpdateDecision(False, 0.0, 0.0, 0.0) # Default decision
+        raise NotImplementedError("Subclasses must implement add_memory_trace_async")
 
 
 class GPUAcceleratedDMN(IntegratedMemoryNode):
@@ -350,10 +325,6 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
 
                 # Assuming self.memory_traces is List[MemoryTrace] and self.trace_index is Dict[str, int] for this method.
                 # This will require an __init__ update in a subsequent step.
-                if not isinstance(self.memory_traces, list):
-                     logger.warning(f"DMN {self.node_id}: self.memory_traces is not a list as expected by new add_memory_trace_async. Re-initializing. THIS REQUIRES __init__ UPDATE.")
-                     self.memory_traces = []
-                     self.trace_index = {} # If memory_traces is a list, trace_index must map id to index
 
                 self.memory_traces.append(trace)
                 self.trace_index[trace.trace_id] = len(self.memory_traces) - 1
