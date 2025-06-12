@@ -11,55 +11,10 @@ import uuid
 from typing import Dict, Optional
 import asyncio
 from typing import Optional, Any
+from .btsp import BTSPUpdateMechanism, BTSPUpdateDecision
 
 
 logger = logging.getLogger(__name__)
-
-
-class UpdateDecision:
-    """Update decision with calcium_level"""
-    def __init__(self, should_update, calcium_level, novelty, importance):
-        self.should_update = should_update
-        self.calcium_level = calcium_level  # This is what you needed!
-        self.novelty = novelty
-        self.importance = importance
-
-class SimpleBTSP:
-    """Simple BTSP that provides calcium_level"""
-
-    def __init__(self, config):
-        self.calcium_threshold = config.get('calcium_threshold', 0.7)
-        self.novelty_weight = config.get('novelty_weight', 0.4)
-
-    async def evaluate_async(self, content, context, existing_traces, user_feedback=None):
-        """Evaluate and return decision with calcium_level"""
-
-        # Calculate novelty
-        novelty = 1.0
-        if existing_traces:
-            similarities = []
-            for trace in existing_traces[-10:]:  # Check recent traces
-                try:
-                    sim = torch.cosine_similarity(content, trace.content, dim=0)
-                    similarities.append(sim.item())
-                except Exception as e:
-                    logger.warning(f"Could not compute similarity for a trace: {e}")
-                    continue
-
-            if similarities:
-                max_sim = max(similarities)
-                novelty = 1.0 - max_sim
-
-        # Get importance from context
-        importance = context.get('importance', 0.5)
-        if isinstance(importance, str):
-            importance = {'high': 0.9, 'medium': 0.6, 'low': 0.3}.get(importance, 0.5)
-
-        # Calculate calcium level
-        calcium_level = novelty * self.novelty_weight + importance * (1 - self.novelty_weight)
-        should_update = calcium_level > self.calcium_threshold
-
-        return UpdateDecision(should_update, calcium_level, novelty, importance)
 
 
 @dataclass
@@ -119,8 +74,9 @@ class IntegratedMemoryNode:
 
     async def _init_biological_mechanisms(self):
         """Initialize with simple BTSP"""
-        self.btsp = SimpleBTSP(self.config.get('btsp', {}))
+        # self.btsp = SimpleBTSP(self.config.get('btsp', {})) # Replaced by GPUAcceleratedDMN
         # Note: GPUAcceleratedDMN's _init_biological_mechanisms calls super() then does more.
+        pass # Base class does not initialize, expects subclass or direct init
 
     async def add_memory_trace_async(self, content, context, salience, **kwargs):
         raise NotImplementedError("Subclasses must implement add_memory_trace_async")
@@ -164,8 +120,12 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
     async def _init_biological_mechanisms(self):
         """Enhanced biological mechanisms with GPU dynamics"""
 
-        # Initialize parent biological mechanisms (BTSP)
-        await super()._init_biological_mechanisms()
+        # Initialize BTSP Update Mechanism
+        btsp_config = self.config.get('btsp', {})
+        btsp_config['device'] = self.device # Ensure device is passed
+        btsp_config['dimension'] = self.dimension # Ensure dimension is passed
+        self.btsp = BTSPUpdateMechanism(btsp_config)
+        logger.info(f"DMN {self.node_id}: BTSPUpdateMechanism initialized with device={self.device}, dimension={self.dimension}")
 
         # Initialize FAISS indexing
         self._init_indexing_system()
