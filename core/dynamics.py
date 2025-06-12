@@ -11,7 +11,349 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
 
+
+class ConsolidationState(Enum):
+    INITIAL = "initial"
+    CONSOLIDATING = "consolidating"
+    CONSOLIDATED = "consolidated"
+    REACTIVATED = "reactivated"
+    WEAKENING = "weakening"
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ConsolidationProgress:
+    """Tracks detailed consolidation progress with biological realism"""
+    calcium_level: float = 0.0
+    protein_synthesis_level: float = 0.0
+    synaptic_strength: float = 0.0
+    systems_integration: float = 0.0
+    homeostatic_scaling: float = 0.0
+    last_calcium_spike: float = 0.0
+    consolidation_attempts: int = 0
+    interference_resistance: float = 0.0
+
+
+class CalciumDynamicsSimulator:
+    """Simulates calcium dynamics for BTSP-based consolidation"""
+
+    def __init__(self, threshold: float = 0.7, decay_tau: float = 10.0):
+        self.threshold = threshold
+        self.decay_tau = decay_tau  # Time constant in seconds
+        self.calcium_level = 0.0
+        self.last_update_time = 0.0
+
+    async def update_calcium(self, signal_strength: float, current_time: float) -> float:
+        """Update calcium level with temporal decay and signal integration"""
+        try:
+            # Apply temporal decay
+            if self.last_update_time > 0:
+                dt = current_time - self.last_update_time
+                decay_factor = np.exp(-dt / self.decay_tau)
+                self.calcium_level *= decay_factor
+
+            # Signal-driven calcium influx (simulating NMDA/VGCC activation)
+            calcium_influx = signal_strength * 0.3  # Scaling factor
+            self.calcium_level += calcium_influx
+
+            # Saturation and bounds
+            self.calcium_level = np.clip(self.calcium_level, 0.0, 2.0)
+            self.last_update_time = current_time
+
+            return self.calcium_level
+
+        except Exception as e:
+            logger.error(f"Error updating calcium dynamics: {e}")
+            return self.calcium_level
+
+
+class BTSPConsolidationEngine:
+    """BTSP-based consolidation engine with multi-timescale dynamics"""
+
+    def __init__(self, config: Optional[Dict] = None):
+        self.config = config or self._default_config()
+        self.calcium_simulator = CalciumDynamicsSimulator(
+            threshold=self.config['calcium_threshold'],
+            decay_tau=self.config['calcium_decay_tau']
+        )
+        self.consolidation_stats = defaultdict(int)
+        self.active_consolidations = {}
+
+    def _default_config(self) -> Dict:
+        return {
+            'calcium_threshold': 0.7,
+            'calcium_decay_tau': 10.0,
+            'consolidation_rate': 0.1,
+            'interference_threshold': 0.3,
+            'max_concurrent_consolidations': 50,
+            'protein_synthesis_window': 600,  # 10 minutes
+            'systems_consolidation_window': 3600,  # 1 hour
+            'homeostatic_window': 86400,  # 24 hours
+        }
+
+    async def compute_consolidation_signal(self, trace: Any, current_time: float) -> float:
+        """Compute consolidation signal based on multiple factors"""
+        try:
+            signals = []
+            salience_signal = getattr(trace, 'current_salience', 0.0)
+            signals.append(salience_signal)
+            access_count = getattr(trace, 'access_count', 0)
+            access_signal = np.log1p(access_count) / 10.0
+            signals.append(access_signal)
+            if hasattr(trace, 'temporal_metadata'):
+                temporal_coherence = getattr(trace.temporal_metadata, 'temporal_coherence', 0.0)
+                signals.append(temporal_coherence)
+            interference = await self._compute_interference(trace, current_time)
+            signals.append(-interference * self.config['interference_threshold'])
+            weights = [0.4, 0.2, 0.2, 0.2]
+            total_signal = sum(w * s for w, s in zip(weights, signals))
+            return np.clip(total_signal, 0.0, 1.0)
+        except Exception as e:
+            logger.error(f"Error computing consolidation signal: {e}")
+            return 0.0
+
+    async def _compute_interference(self, trace: Any, current_time: float) -> float:
+        """Compute interference from other consolidating memories"""
+        try:
+            if not hasattr(trace, 'content_embedding'):
+                return 0.0
+            interference_score = 0.0
+            trace_embedding = trace.content_embedding
+            for other_trace_id, other_trace_obj in self.active_consolidations.items(): # renamed other_trace to other_trace_obj
+                if other_trace_id == getattr(trace, 'trace_id', None):
+                    continue
+                if hasattr(other_trace_obj, 'content_embedding'):
+                    similarity = torch.cosine_similarity(
+                        trace_embedding.unsqueeze(0),
+                        other_trace_obj.content_embedding.unsqueeze(0)
+                    ).item()
+                    other_strength = 0.0
+                    if hasattr(other_trace_obj, 'temporal_metadata'):
+                        other_strength = getattr(other_trace_obj.temporal_metadata, 'consolidation_strength', 0.0)
+                    interference_score += similarity * other_strength
+            return np.clip(interference_score, 0.0, 1.0)
+        except Exception as e:
+            logger.error(f"Error computing interference: {e}")
+            return 0.0
+
+    async def initiate_consolidation(self, trace: Any, current_time: float) -> bool:
+        """
+        Enhanced consolidation initiation with BTSP mechanisms and multi-timescale dynamics
+        """
+        try:
+            trace_id = getattr(trace, 'trace_id', f'trace_{id(trace)}')
+            logger.debug(f"Initiating enhanced consolidation for trace {trace_id}")
+            if trace_id in self.active_consolidations:
+                logger.debug(f"Trace {trace_id} already consolidating")
+                return False
+            if len(self.active_consolidations) >= self.config.get('max_concurrent_consolidations', 50):
+                logger.warning("Maximum concurrent consolidations reached")
+                return False
+            if not hasattr(trace, 'temporal_metadata'):
+                from core.memory_trace import TemporalMetadata # Assuming TemporalMetadata is in core.memory_trace
+                trace.temporal_metadata = TemporalMetadata()
+            age_category = self._get_temporal_age_category(trace, current_time)
+            consolidation_signal = await self.compute_consolidation_signal(trace, current_time)
+            calcium_level = await self.calcium_simulator.update_calcium(
+                consolidation_signal, current_time
+            )
+            if calcium_level < self.config['calcium_threshold']:
+                logger.debug(f"Calcium level {calcium_level:.3f} below threshold {self.config['calcium_threshold']}")
+                return False
+            consolidation_progress = ConsolidationProgress(
+                calcium_level=calcium_level,
+                last_calcium_spike=current_time,
+                consolidation_attempts=1
+            )
+            trace.temporal_metadata.consolidation_state = ConsolidationState.CONSOLIDATING
+            trace.temporal_metadata.last_consolidation = current_time
+            trace.temporal_metadata.consolidation_strength = 0.1
+            if not hasattr(trace, '_consolidation_progress'): # Ensure attribute exists before assignment
+                trace._consolidation_progress = consolidation_progress
+            else: # if it exists, update it
+                trace._consolidation_progress = consolidation_progress
+
+            self.active_consolidations[trace_id] = trace
+            self.consolidation_stats['initiated'] += 1
+            self.consolidation_stats[f'initiated_{age_category}'] += 1
+            logger.info(f"Consolidation initiated for trace {trace_id} (age: {age_category}, calcium: {calcium_level:.3f})")
+            return True
+        except Exception as e:
+            logger.error(f"Error initiating consolidation for trace {getattr(trace, 'trace_id', 'unknown')}: {e}")
+            return False
+
+    async def update_consolidation_progress(self, trace: Any, current_time: float,
+                                          progress_increment: float = None) -> bool:
+        """
+        Enhanced consolidation progress update with multi-timescale biological dynamics
+        """
+        try:
+            trace_id = getattr(trace, 'trace_id', f'trace_{id(trace)}')
+            if not hasattr(trace, 'temporal_metadata'):
+                logger.warning(f"No temporal metadata for trace {trace_id}")
+                return False
+            if trace.temporal_metadata.consolidation_state != ConsolidationState.CONSOLIDATING:
+                return False
+            if not hasattr(trace, '_consolidation_progress'):
+                trace._consolidation_progress = ConsolidationProgress()
+            progress = trace._consolidation_progress
+            age_category = self._get_temporal_age_category(trace, current_time)
+            if progress_increment is None:
+                progress_increment = await self._compute_timescale_progress(
+                    trace, current_time, age_category
+                )
+            consolidation_signal = await self.compute_consolidation_signal(trace, current_time)
+            calcium_level = await self.calcium_simulator.update_calcium(
+                consolidation_signal, current_time
+            )
+            progress.calcium_level = calcium_level
+            success = await self._update_multiscale_consolidation(
+                trace, progress, current_time, age_category, progress_increment
+            )
+            if not success:
+                return False
+            old_strength = trace.temporal_metadata.consolidation_strength
+            new_strength = self._compute_consolidated_strength(progress)
+            trace.temporal_metadata.consolidation_strength = min(1.0, new_strength)
+            completion_threshold = self._get_completion_threshold(age_category)
+            if new_strength >= completion_threshold:
+                await self._complete_consolidation(trace, current_time)
+                self.consolidation_stats['completed'] += 1
+                logger.info(f"Consolidation completed for trace {trace_id} (strength: {new_strength:.3f})")
+            strength_improvement = new_strength - old_strength
+            if strength_improvement > 0:
+                self.consolidation_stats['progress_updates'] += 1
+                self.consolidation_stats[f'progress_{age_category}'] += 1
+            logger.debug(f"Consolidation progress for trace {trace_id}: {old_strength:.3f} -> {new_strength:.3f}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating consolidation progress for trace {getattr(trace, 'trace_id', 'unknown')}: {e}")
+            return False
+
+    def _get_temporal_age_category(self, trace: Any, current_time: float) -> str:
+        """Determine temporal age category based on biological timescales"""
+        try:
+            age = current_time - getattr(trace, 'timestamp', current_time)
+            if age < 0.005: return "fast_synaptic"
+            elif age < 0.5: return "calcium_plasticity"
+            elif age < 60: return "protein_synthesis"
+            elif age < 3600: return "homeostatic_scaling"
+            else: return "systems_consolidation"
+        except Exception as e:
+            logger.error(f"Error determining age category: {e}")
+            return "protein_synthesis"
+
+    async def _compute_timescale_progress(self, trace: Any, current_time: float,
+                                        age_category: str) -> float:
+        """Compute progress increment based on biological timescale"""
+        try:
+            base_rates = {
+                "fast_synaptic": 0.5, "calcium_plasticity": 0.3,
+                "protein_synthesis": 0.1, "homeostatic_scaling": 0.05,
+                "systems_consolidation": 0.02
+            }
+            base_rate = base_rates.get(age_category, 0.1)
+            salience_factor = getattr(trace, 'current_salience', 0.5)
+            calcium_factor = min(1.0, self.calcium_simulator.calcium_level / self.config['calcium_threshold'])
+            interference = await self._compute_interference(trace, current_time)
+            interference_factor = 1.0 - (interference * 0.5)
+            progress_val = base_rate * salience_factor * calcium_factor * interference_factor # Renamed progress to progress_val
+            return np.clip(progress_val, 0.0, 0.5)
+        except Exception as e:
+            logger.error(f"Error computing timescale progress: {e}")
+            return 0.01
+
+    async def _update_multiscale_consolidation(self, trace: Any, progress: ConsolidationProgress,
+                                             current_time: float, age_category: str,
+                                             progress_increment: float) -> bool:
+        """Update consolidation across multiple biological timescales"""
+        try:
+            if age_category in ["protein_synthesis", "homeostatic_scaling", "systems_consolidation"]:
+                protein_factor = min(1.0, progress.calcium_level * 2.0)
+                progress.protein_synthesis_level = min(1.0,
+                    progress.protein_synthesis_level + progress_increment * protein_factor
+                )
+            if progress.calcium_level > self.config['calcium_threshold']:
+                strength_factor = (progress.calcium_level - self.config['calcium_threshold']) / \
+                                   (2.0 - self.config['calcium_threshold'])
+                progress.synaptic_strength = min(1.0,
+                    progress.synaptic_strength + progress_increment * strength_factor
+                )
+            if age_category in ["homeostatic_scaling", "systems_consolidation"]:
+                systems_factor = progress.protein_synthesis_level * 0.5
+                progress.systems_integration = min(1.0,
+                    progress.systems_integration + progress_increment * systems_factor
+                )
+            if age_category == "systems_consolidation":
+                homeostatic_factor = progress.systems_integration * 0.3
+                progress.homeostatic_scaling = min(1.0,
+                    progress.homeostatic_scaling + progress_increment * homeostatic_factor
+                )
+            resistance_increment = progress_increment * 0.2
+            progress.interference_resistance = min(1.0,
+                progress.interference_resistance + resistance_increment
+            )
+            progress.consolidation_attempts += 1
+            return True
+        except Exception as e:
+            logger.error(f"Error updating multiscale consolidation: {e}")
+            return False
+
+    def _compute_consolidated_strength(self, progress: ConsolidationProgress) -> float:
+        """Compute overall consolidation strength from multi-timescale components"""
+        try:
+            weights = {'calcium': 0.2, 'protein': 0.25, 'synaptic': 0.25, 'systems': 0.2, 'homeostatic': 0.1}
+            components = {
+                'calcium': min(1.0, progress.calcium_level / 2.0),
+                'protein': progress.protein_synthesis_level,
+                'synaptic': progress.synaptic_strength,
+                'systems': progress.systems_integration,
+                'homeostatic': progress.homeostatic_scaling
+            }
+            total_strength = sum(weights[k] * components[k] for k in weights.keys())
+            resistance_bonus = progress.interference_resistance * 0.1
+            return min(1.0, total_strength + resistance_bonus)
+        except Exception as e:
+            logger.error(f"Error computing consolidated strength: {e}")
+            return 0.0
+
+    def _get_completion_threshold(self, age_category: str) -> float:
+        """Get consolidation completion threshold based on age category"""
+        thresholds = {
+            "fast_synaptic": 0.8, "calcium_plasticity": 0.75,
+            "protein_synthesis": 0.7, "homeostatic_scaling": 0.65,
+            "systems_consolidation": 0.6
+        }
+        return thresholds.get(age_category, 0.7)
+
+    async def _complete_consolidation(self, trace: Any, current_time: float):
+        """Complete consolidation process and cleanup"""
+        try:
+            trace_id = getattr(trace, 'trace_id', f'trace_{id(trace)}')
+            trace.temporal_metadata.consolidation_state = ConsolidationState.CONSOLIDATED
+            trace.temporal_metadata.last_consolidation = current_time
+            if trace_id in self.active_consolidations:
+                del self.active_consolidations[trace_id]
+            logger.info(f"Consolidation completed for trace {trace_id}")
+        except Exception as e:
+            logger.error(f"Error completing consolidation: {e}")
+
+    async def get_consolidation_statistics(self) -> Dict[str, Any]:
+        """Get detailed consolidation statistics"""
+        try:
+            stats = dict(self.consolidation_stats)
+            stats.update({
+                'active_consolidations': len(self.active_consolidations),
+                'calcium_level': self.calcium_simulator.calcium_level,
+                'calcium_threshold': self.config['calcium_threshold'],
+                'consolidation_rate': self.config['consolidation_rate'],
+                'timestamp': time.time()
+            })
+            return stats
+        except Exception as e:
+            logger.error(f"Error getting consolidation statistics: {e}")
+            return {}
 
 # Add these class definitions to fix the import errors
 @dataclass
@@ -506,35 +848,36 @@ class GPUTemporalDynamics:
         
         return stats
 
-class IntegratedMultiTimescaleDynamics:
-    """Complete integration layer with proper timescale orchestration"""
+class IntegratedMultiTimescaleDynamics(BTSPConsolidationEngine):
+    """Complete integration layer with proper timescale orchestration, including BTSP consolidation."""
     
     def __init__(self, config=None, device="auto"):
+        # Initialize BTSP consolidation engine first
+        # Extract consolidation-specific config, or provide an empty dict if not found
+        consolidation_config = config.get('consolidation', {}) if config else {}
+        super().__init__(consolidation_config)
+
+        # Then initialize dynamics-specific components
         self.device = "cuda" if device == "auto" and torch.cuda.is_available() else device
-        
-        # Initialize GPU dynamics engine
+
+        # Use config for max_synapses, defaulting if not provided
         max_synapses = config.get('max_synapses', 100000) if config else 100000
         self.gpu_dynamics = GPUTemporalDynamics(self.device, max_synapses=max_synapses)
-        
-        # Initialize trace-synapse mapping
         self.synapse_mapping = SynapseTraceMapping(max_synapses)
-        
-        # Initialize timescale schedules
+
+        # Initialize timescale schedules (ensure TimescaleSchedule is defined or imported)
         self.schedules = {
-            'fast_synaptic': TimescaleSchedule(interval=0.005),     # 5ms
-            'calcium_plasticity': TimescaleSchedule(interval=0.5),  # 500ms
-            'protein_synthesis': TimescaleSchedule(interval=60.0),  # 60s
-            'homeostatic_scaling': TimescaleSchedule(interval=3600.0), # 1 hour
+            'fast_synaptic': TimescaleSchedule(interval=0.005),
+            'calcium_plasticity': TimescaleSchedule(interval=0.5),
+            'protein_synthesis': TimescaleSchedule(interval=60.0),
+            'homeostatic_scaling': TimescaleSchedule(interval=3600.0),
         }
-        
-        self.current_time = 0.0
+
+        self.current_time = 0.0 # This might be already set by BTSPConsolidationEngine or managed differently. Review if necessary.
         self.is_running = False
-        
-        # Statistics
-        self.update_counts = defaultdict(int)
-        self.last_stats_time = time.time()
-        
-        logger.info(f"Integrated Multi-Timescale Dynamics initialized with {max_synapses} synapses")
+        self.update_counts = defaultdict(int) # This is specific to IntegratedMultiTimescaleDynamics
+
+        logger.info(f"Enhanced IntegratedMultiTimescaleDynamics with inherited BTSP initialized, max_synapses={max_synapses}")
 
     async def start(self):
         """Start the dynamics engine"""
@@ -661,18 +1004,44 @@ class IntegratedMultiTimescaleDynamics:
             return False
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get comprehensive system statistics"""
+        """Get comprehensive system statistics from both dynamics and consolidation engine."""
         base_stats = self.gpu_dynamics.get_performance_stats()
-        
+
+        # Get consolidation stats. Since get_consolidation_statistics is async,
+        # and get_stats is synchronous, we need to run the async method.
+        # Ensure asyncio is imported.
+        try:
+            # If an event loop is already running (e.g., in a Jupyter notebook or other async context)
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # This is tricky. If called from an async context that's already running,
+                # creating a new task might be better, but that makes get_stats async.
+                # For simplicity in a sync method, we might just log a warning
+                # or attempt asyncio.run in a thread if truly necessary.
+                # The simplest approach for now if a loop is running is to not block it with asyncio.run directly.
+                # However, the user's example used asyncio.run. Let's try to stick to that.
+                # If issues arise, this part might need refinement based on execution context.
+                consolidation_stats = asyncio.run(self.get_consolidation_statistics())
+            else:
+                consolidation_stats = asyncio.run(self.get_consolidation_statistics())
+        except RuntimeError as e:
+            # RuntimeError is often raised by asyncio.run if it's called from a running loop
+            # or if it's re-entrant.
+            logger.warning(f"Could not get consolidation stats via asyncio.run: {e}. Falling back to empty dict.")
+            consolidation_stats = {"error": str(e)}
+        except Exception as e:
+            logger.error(f"Error getting consolidation_stats: {e}")
+            consolidation_stats = {"error": str(e)}
+
+
         base_stats.update({
             'is_running': self.is_running,
-            'current_time': self.current_time,
+            'current_time': self.current_time, # This is IntegratedMultiTimescaleDynamics's current_time
             'update_counts': dict(self.update_counts),
-            'temporal_coherence': 1.0,  # Could compute from GPU state
-            'system_stability': 1.0,    # Could compute from weight changes
-            'synapse_utilization': len(self.synapse_mapping.trace_to_synapse) / self.synapse_mapping.max_synapses
+            'synapse_utilization': len(self.synapse_mapping.trace_to_synapse) / self.synapse_mapping.max_synapses,
+            'consolidation_engine_stats': consolidation_stats # Nest consolidation stats
         })
-        
+
         return base_stats
 
     def register_trace(self, trace_id: str) -> bool:
