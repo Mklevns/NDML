@@ -204,53 +204,6 @@ class MemoryTrace:
             'created_at': time.time()
         }
 
-    def get_temporal_priority(self) -> float:
-        """Get temporal priority for this trace."""
-        if self.temporal_metadata is None:
-            return 5.0  # Default priority
-        
-        base_priority = self.salience * 10
-        if self.temporal_metadata.consolidation_state == ConsolidationState.CONSOLIDATED:
-            base_priority *= 1.2
-        
-        return base_priority
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize to dictionary for storage/transmission"""
-        result = {
-            'trace_id': self.trace_id,
-            'content': self.content.cpu().numpy().tolist(),
-            'context': self.context,
-            'timestamp': self.timestamp,
-            'last_access': self.last_access,
-            'access_pattern': self.access_pattern,
-            'salience': self.salience,
-            'current_salience': self.current_salience,
-            'importance_votes': self.importance_votes,
-            'access_count': self.access_count,
-            'successful_retrievals': self.successful_retrievals,
-            'context_matches': self.context_matches,
-            'creation_node': self.creation_node,
-            'consolidation_level': self.consolidation_level,
-            'eviction_protection': self.eviction_protection,
-            'associated_traces': list(self.associated_traces),
-            'causal_predecessors': list(self.causal_predecessors),
-            'interference_traces': list(self.interference_traces)
-        }
-        
-        # Add temporal metadata if present
-        if self.temporal_metadata is not None:
-            result['temporal_metadata'] = {
-                'consolidation_cycles': self.temporal_metadata.consolidation_cycles,
-                'last_consolidation': self.temporal_metadata.last_consolidation,
-                'temporal_weight': self.temporal_metadata.temporal_weight,
-                'phase_coherence': self.temporal_metadata.phase_coherence,
-                'consolidation_state': self.temporal_metadata.consolidation_state.value,
-                'consolidation_strength': self.temporal_metadata.consolidation_strength,
-                'temporal_coherence': self.temporal_metadata.temporal_coherence
-            }
-        
-        return result
     
     def update_temporal_state(self, temporal_context: Dict[str, Any]):
     
