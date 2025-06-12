@@ -6,6 +6,8 @@ import hashlib
 from typing import Dict, Any, Optional, Union, List, Set
 from dataclasses import dataclass, field
 from enum import Enum
+from core.lifecycle 
+from .lifecycle import MemoryLifecycleState
 
 
 # Define enums FIRST before they're used
@@ -63,6 +65,7 @@ class MemoryTrace:
     creation_node: str = ""  # Originating node ID
     consolidation_level: int = 0  # 0=episodic, 1=working, 2=semantic
     eviction_protection: bool = False  # Protect from eviction
+    MemoryLifecycleState = MemoryLifecycleState.ACTIVE
 
     # Relationships
     associated_traces: Set[str] = field(default_factory=set)  # Related memories
@@ -71,6 +74,7 @@ class MemoryTrace:
 
     # Temporal metadata
     temporal_metadata: Optional[TemporalMetadata] = None
+    
 
     def __post_init__(self):
         if self.last_access == 0.0:
@@ -110,6 +114,7 @@ class MemoryTrace:
             'associated_traces': list(self.associated_traces),
             'causal_predecessors': list(self.causal_predecessors),
             'interference_traces': list(self.interference_traces)
+            'state': self.state.value,
         }
         
         # Add temporal metadata if present
@@ -304,6 +309,11 @@ class MemoryTrace:
         trace.associated_traces = set(data.get('associated_traces', []))
         trace.causal_predecessors = set(data.get('causal_predecessors', []))
         trace.interference_traces = set(data.get('interference_traces', []))
+        trace = cls(if 'state' in data:
+        trace.state = MemoryLifecycleState(data['state'])
+
+    
+)
 
         # Restore temporal metadata if present
         if 'temporal_metadata' in data:
