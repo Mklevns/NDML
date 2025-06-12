@@ -8,54 +8,17 @@ import time
 from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field
 import uuid
-from typing import Dict, Optional
+# from typing import Dict, Optional # Duplicate, remove if already imported from line above
 import asyncio
-from typing import Optional, Any
+# from typing import Optional, Any # Duplicate, remove if already imported from line above
+from core.memory_trace import EnhancedMemoryTrace # Added import
 from .btsp import BTSPUpdateMechanism, BTSPUpdateDecision
 
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class MemoryTrace:
-    trace_id: str
-    content: torch.Tensor
-    context: Dict[str, Any]  # Make context more specific if possible, else Any
-    salience: float
-    timestamp: float
-
-    # New fields from user's method
-    last_access: float = 0.0 # Initialized by add_memory_trace_async with current_time
-    current_salience: float = 0.0 # Initialized by add_memory_trace_async with salience
-    creation_node: str = "" # Initialized by add_memory_trace_async
-    access_count: int = 0
-    successful_retrievals: int = 0 # Not explicitly set by new method, but good to have
-    context_matches: int = 0 # Not explicitly set by new method, but good to have
-    consolidation_level: float = 0.0
-    eviction_protection: bool = False
-
-    def __post_init__(self):
-        # Initialize last_access and current_salience if not set by constructor,
-        # though the new add_memory_trace_async sets them.
-        if self.last_access == 0.0: # Check if default, means not set by specific constructor
-            self.last_access = self.timestamp
-        if self.current_salience == 0.0 and self.salience != 0.0: # Check if default
-             self.current_salience = self.salience
-        if not self.creation_node: # if empty string
-            # This might be an issue if trace_id doesn't contain node_id or if node_id isn't easily accessible here
-            # For now, leave it, as add_memory_trace_async sets it.
-            pass
-
-
-    def update_access_stats(self, current_time: float, context_relevant: bool = False):
-        self.last_access = current_time
-        self.access_count += 1
-        if context_relevant:
-            self.context_matches += 1
-        # successful_retrievals would typically be incremented by the calling code after confirming retrieval was useful.
-        # current_salience might decay or be updated by other mechanisms, not covered here.
-        logger.debug(f"Trace {self.trace_id}: Accessed. Count: {self.access_count}, Last: {self.last_access}, ContextRelevant: {context_relevant}")
+# Removed MemoryTrace dataclass definition, will use EnhancedMemoryTrace from core.memory_trace
 
 class IntegratedMemoryNode:
     """Base class to replace missing EnhancedDistributedMemoryNode"""
@@ -102,8 +65,8 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
         # Initialize parent class
         super().__init__(node_id, dimension, capacity, specialization, device, config)
 
-        # self.memory_traces is now a list of MemoryTrace objects
-        self.memory_traces: List[MemoryTrace] = []
+        # self.memory_traces is now a list of EnhancedMemoryTrace objects
+        self.memory_traces: List[EnhancedMemoryTrace] = []
         # self.trace_index maps trace_id (str) to the list index (int)
         self.trace_index: Dict[str, int] = {}
 
@@ -187,7 +150,7 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
             self.gpu_resources = None
 
     async def add_memory_trace_async(self, content: torch.Tensor, context: Dict[str, Any],
-                                   salience: float, user_feedback=None) -> Optional[MemoryTrace]:
+                                   salience: float, user_feedback=None) -> Optional[EnhancedMemoryTrace]:
         """Complete memory storage with GPU dynamics integration"""
 
         try:
@@ -205,22 +168,37 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
             trace_id_payload = content.cpu().numpy().tobytes()
             trace_id = f"{self.node_id}_{int(current_time * 1000)}_{hash(trace_id_payload) % 100000}"
 
+            # Create EnhancedMemoryTrace instance
+            # Note: EnhancedMemoryTrace has different fields. We need to map appropriately.
+            # Assuming EnhancedMemoryTrace has id, content, embedding, timestamp, importance_signals, etc.
+            # The 'content' field in EnhancedMemoryTrace is a string, while DMN works with embeddings.
+            # This implies a mismatch or that 'content' in DMN's MemoryTrace was effectively the embedding.
+            # For now, let's assume content from DMN maps to 'embedding' in EnhancedMemoryTrace.
+            # A 'content_string' or similar would be needed for EnhancedMemoryTrace.content if it's textual.
 
-            trace = MemoryTrace(
-                content=content.clone().detach(), # Store a detached clone
-                context=context.copy(), # Store a copy of the context
+            # Placeholder for actual text content if available, otherwise use trace_id or a summary
+            content_text_placeholder = f"Memory content for trace {trace_id}"
+
+            trace = EnhancedMemoryTrace(
+                id=trace_id,
+                content=content_text_placeholder, # This is a string field in EnhancedMemoryTrace
+                embedding=content.clone().detach(), # DMN's content is the embedding
                 timestamp=current_time,
-                last_access=current_time, # Set last_access on creation
-                salience=salience,
-                current_salience=salience, # Initialize current_salience
-                trace_id=trace_id,
-                creation_node=self.node_id, # Set creation_node
-                access_count=0, # Explicitly 0
-                successful_retrievals=0, # Explicitly 0
-                context_matches=0, # Explicitly 0
-                consolidation_level=0.0, # Explicitly 0.0
-                eviction_protection=False # Explicitly False
+                # Initialize ImportanceSignals; some fields might be set by BTSP or later updates
+                # access_count, successful_retrievals are part of EnhancedMemoryTrace directly
+                access_count=0,
+                successful_retrievals=0
+                # Other EnhancedMemoryTrace fields like consolidation_level, context_vector, etc.,
+                # would be initialized to their defaults or set based on context/config if available.
             )
+            # Set creation_node if it's part of EnhancedMemoryTrace or its metadata (not directly in provided EnhancedMemoryTrace definition)
+            # trace.creation_node = self.node_id # Example if such a field existed
+
+            # Update last_access and current_salience if these concepts are maintained in EnhancedMemoryTrace
+            # EnhancedMemoryTrace uses importance_signals.
+            # The old 'salience' could map to 'raw_importance' or a component of 'final_importance'.
+            trace.importance_signals.raw_importance = salience # Example mapping
+            # trace.importance_signals.final_importance = salience # Or directly set final
 
             # BTSP evaluation - get calcium_level!
             calcium_level = 1.0 # Default calcium level
@@ -268,7 +246,7 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
                 await self._add_to_index_async(trace) # Add to FAISS
 
                 # Add to memory_traces list and update trace_index dictionary.
-                # self.memory_traces is List[MemoryTrace].
+            # self.memory_traces is List[EnhancedMemoryTrace].
                 # self.trace_index is Dict[str, int] (trace_id to list index).
                 self.memory_traces.append(trace)
                 self.trace_index[trace.trace_id] = len(self.memory_traces) - 1
@@ -380,12 +358,13 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
 
             logger.info(f"DMN {self.node_id}: Processing {len(self.memory_traces)} traces for re-indexing.")
 
-            for trace in self.memory_traces: # self.memory_traces is now a List[MemoryTrace]
-                if not hasattr(trace, 'content') or not isinstance(trace.content, torch.Tensor):
-                    logger.warning(f"DMN {self.node_id}: Trace {trace.trace_id} has invalid or missing content, skipping.")
+            for trace in self.memory_traces: # self.memory_traces is now a List[EnhancedMemoryTrace]
+                # In EnhancedMemoryTrace, the tensor is 'embedding', 'content' is string.
+                if not hasattr(trace, 'embedding') or not isinstance(trace.embedding, torch.Tensor):
+                    logger.warning(f"DMN {self.node_id}: Trace {trace.id} has invalid or missing embedding, skipping.")
                     continue
 
-                content_cpu = trace.content.detach().cpu()
+                content_cpu = trace.embedding.detach().cpu()
 
                 # Ensure content is a 1D vector or can be treated as one.
                 if content_cpu.ndim == 0:
@@ -406,7 +385,7 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
                 all_vectors.append(content_np)
 
                 faiss_id = self.next_faiss_id
-                self.faiss_id_to_trace_id[faiss_id] = trace.trace_id # Use trace.trace_id here
+                self.faiss_id_to_trace_id[faiss_id] = trace.id # Use trace.id for EnhancedMemoryTrace
                 all_faiss_ids.append(faiss_id)
                 self.next_faiss_id += 1
 
@@ -492,7 +471,26 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
             else:
                 modulated_sim = sim
             
-            trace.update_access_stats(current_time, context_relevant=True)
+            # Update access statistics and importance signals
+            # The old MemoryTrace had update_access_stats. EnhancedMemoryTrace handles this differently.
+            # We'll increment access_count directly on the EnhancedMemoryTrace object.
+            # The prompt asks to call trace.update_access_stats(current_time, context_relevant=True)
+            # but EnhancedMemoryTrace (from subtask 2) does not have this method.
+            # Instead, we directly update access_count and then call update_importance.
+
+            trace.access_count += 1
+            # If EnhancedMemoryTrace had a last_accessed_time field (like in the subtask 1 placeholder), it would be:
+            # trace.last_accessed_time = current_time
+            # However, the definition from subtask 2 of EnhancedMemoryTrace does not include last_accessed_time.
+            # The context_relevant=True aspect from the old update_access_stats is not directly mapped here,
+            # but could be a factor in how btsp_calcium or access_pattern is determined if available.
+
+            # Update importance signals as per instructions
+            # current_time is already defined in this method.
+            mock_btsp_calcium = getattr(trace.importance_signals, 'btsp_calcium', 0.1) # Use existing or default
+            mock_access_pattern = [] # Placeholder, as DMN doesn't seem to store this per trace directly for this call
+            trace.update_importance(btsp_calcium=mock_btsp_calcium, access_pattern=mock_access_pattern)
+
             results.append((trace, float(modulated_sim)))
             
             if len(results) >= k:
