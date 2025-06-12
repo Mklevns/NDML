@@ -130,7 +130,7 @@ async def test_add_memory_trace_async_btsp_decision(dmn_instance, mock_btsp_clas
     type(mock_decision_instance).calcium_level = PropertyMock(return_value=0.9)
 
     # Make evaluate_async return this specific, configured instance
-    dmn.btsp.evaluate_async = MagicMock(return_value=mock_decision_instance)
+    dmn.btsp.should_update_async = MagicMock(return_value=mock_decision_instance)
 
     sample_content = torch.randn(dmn.dimension)
     sample_context = {"meta": "test"}
@@ -140,8 +140,8 @@ async def test_add_memory_trace_async_btsp_decision(dmn_instance, mock_btsp_clas
     await dmn.add_memory_trace_async(sample_content, sample_context, sample_salience)
 
     # Assert that evaluate_async was called
-    dmn.btsp.evaluate_async.assert_called_once()
-    call_args = dmn.btsp.evaluate_async.call_args
+    dmn.btsp.should_update_async.assert_called_once()
+    call_args = dmn.btsp.should_update_async.call_args
     assert torch.equal(call_args[1]['content'], sample_content) # content is a kwarg
     assert call_args[1]['context'] == sample_context
 
@@ -162,7 +162,7 @@ async def test_add_memory_trace_async_btsp_decision(dmn_instance, mock_btsp_clas
     # Reset for next test case
     dmn.memory_traces.clear()
     dmn.trace_index.clear()
-    dmn.btsp.evaluate_async.reset_mock()
+    dmn.btsp.should_update_async.reset_mock()
     # Reset PropertyMock call counts
     type(mock_decision_instance).should_update.reset_mock()
     type(mock_decision_instance).calcium_level.reset_mock()
@@ -174,7 +174,7 @@ async def test_add_memory_trace_async_btsp_decision(dmn_instance, mock_btsp_clas
 
     await dmn.add_memory_trace_async(sample_content, sample_context, sample_salience)
 
-    dmn.btsp.evaluate_async.assert_called_once()
+    dmn.btsp.should_update_async.assert_called_once()
     assert type(mock_decision_instance).should_update.mock_calls is not None
     assert len(type(mock_decision_instance).should_update.mock_calls) > 0
     # calcium_level might still be accessed even if should_update is False, for logging or other reasons
@@ -188,7 +188,7 @@ async def test_add_memory_trace_async_btsp_decision(dmn_instance, mock_btsp_clas
     assert not dmn.trace_index
 
     # --- Test Case 3: BTSP evaluation fails (optional, good for robustness) ---
-    dmn.btsp.evaluate_async = MagicMock(side_effect=Exception("BTSP Boom!"))
+    dmn.btsp.should_update_async = MagicMock(side_effect=Exception("BTSP Boom!"))
     # Fallback logic in DMN uses salience > config.get('btsp_fallback_salience_threshold', 0.5)
     # Set salience to be above a potential fallback threshold
     high_salience = 0.9
