@@ -87,7 +87,7 @@ The installation process is automated through the `install_ndml.sh` script, whic
 The NDML system consists of several key components:
 
 ### Core Components
-- **EnhancedDistributedMemoryNode (DMN)**: The central memory node that manages memory traces
+- **GPUAcceleratedDMN (DMN)**: The central memory node that manages memory traces
 - **MemoryTrace**: Represents individual memory items with metadata
 - **BTSPUpdateMechanism**: Biologically-inspired plasticity mechanism
 - **MemoryLifecycleManager**: Manages memory lifecycle (creation, consolidation, eviction)

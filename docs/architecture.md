@@ -6,7 +6,7 @@ This document outlines the high-level architecture of the NDML system. It descri
 
 The NDML system is built around a set of core components that provide the fundamental functionalities for neuromorphic distributed memory.
 
-### Enhanced Distributed Memory Node (DMN)
+### GPUAcceleratedDMN (DMN)
 Individual memory storage units with biological plasticity. These nodes are responsible for storing and managing memory traces. They implement mechanisms for memory encoding, retrieval, and local updates based on biological principles.
 
 ### Multi-Timescale Dynamics Engine
@@ -38,7 +38,7 @@ These components facilitate the interaction of the core NDML system with externa
 The MemoryGateway coordinates distributed memory operations across multiple MemoryClusters. It acts as a central access point for storing and retrieving memories from the distributed network of DMNs. It handles routing of requests and aggregation of results.
 
 ### MemoryCluster
-A MemoryCluster is a group of Enhanced Distributed Memory Nodes (DMNs). Clustering DMNs allows for better organization, scalability, and fault tolerance. The MemoryGateway interacts with MemoryClusters to manage the distributed memory.
+A MemoryCluster is a group of GPUAcceleratedDMN (DMNs). Clustering DMNs allows for better organization, scalability, and fault tolerance. The MemoryGateway interacts with MemoryClusters to manage the distributed memory.
 
 ### NDMLIntegratedLLM
 This component provides a seamless integration of the NDML system with Large Language Models (LLMs). It allows an LLM to leverage the neuromorphic memory capabilities of NDML for tasks such as:
@@ -56,7 +56,7 @@ The typical flow of information and interaction between these components is as f
 2.  The **NDMLIntegratedLLM** processes requests, which may involve storing new information or retrieving existing memories.
 3.  For memory operations, the **NDMLIntegratedLLM** communicates with the **MemoryGateway**.
 4.  The **MemoryGateway** routes requests to the appropriate **MemoryCluster(s)**.
-5.  Within a **MemoryCluster**, the request is handled by one or more **Enhanced Distributed Memory Nodes (DMNs)**.
+5.  Within a **MemoryCluster**, the request is handled by one or more **GPUAcceleratedDMN (DMNs)**.
 6.  The **DMNs** utilize the **Multi-Timescale Dynamics Engine** and **BTSP Update Mechanism** to process memory updates and lifecycle events, managed by the **Memory Lifecycle Manager**.
 7.  Retrieved memories are passed back up the chain to the **NDMLIntegratedLLM**, which then integrates them into the LLM's processing.
 
