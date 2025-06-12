@@ -8,10 +8,26 @@ import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 import logging
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+# Add these class definitions to fix the import errors
+@dataclass
+class TemporalState:
+    coherence_metric: float = 1.0
+    system_stability: float = 1.0
+    fast_synaptic: Dict[str, Any] = field(default_factory=dict)
+    calcium_plasticity: Dict[str, Any] = field(default_factory=dict)
+    protein_synthesis: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class TemporalEvent:
+    event_type: str
+    timescale: str
+    params: Dict[str, Any]
+    timestamp: float = field(default_factory=time.time)
 
 @dataclass
 class TimescaleSchedule:
@@ -676,3 +692,6 @@ def create_integrated_dynamics(config: Dict[str, Any]) -> IntegratedMultiTimesca
         config=config,
         device=config.get('device', 'auto')
     )
+
+# Add this alias for MultiTimescaleDynamicsEngine
+MultiTimescaleDynamicsEngine = IntegratedMultiTimescaleDynamics
