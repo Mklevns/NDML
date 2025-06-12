@@ -228,7 +228,7 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
 
             if self.btsp: # Check if BTSP mechanism exists
                 try:
-                    update_decision = await self.btsp.evaluate_async(
+                    update_decision = await self.btsp.should_update_async(
                         content=content, # Pass original content
                         context=context,
                         existing_traces=list(self.memory_traces.values()) if isinstance(self.memory_traces, dict) else self.memory_traces, # Pass the list of current traces
