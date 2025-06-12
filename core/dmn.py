@@ -231,7 +231,7 @@ class GPUAcceleratedDMN(IntegratedMemoryNode):
                     update_decision = await self.btsp.should_update_async(
                         content=content, # Pass original content
                         context=context,
-                        existing_traces=list(self.memory_traces.values()) if isinstance(self.memory_traces, dict) else self.memory_traces, # Pass the list of current traces
+                        existing_traces=self.memory_traces, # Pass the list of current traces
                         user_feedback=user_feedback
                     )
 
