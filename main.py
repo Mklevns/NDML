@@ -67,7 +67,7 @@ def import_with_fallback():
         sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
         # Import existing modules
-        from core.dmn import EnhancedDistributedMemoryNode                    # ← needs "core."
+        from core.dmn import GPUAcceleratedDMN                    # ← needs "core."
         from core.memory_trace import MemoryTrace                             # ← needs "core."
         from core.btsp import BTSPUpdateMechanism                            # ← needs "core."
         from core.dynamics import MultiTimescaleDynamicsEngine               # ← needs "core."
@@ -75,7 +75,7 @@ def import_with_fallback():
         from integration.memory_gateway import MemoryGateway                 # ← needs "integration."
         from integration.fusion_network import MemoryFusionNetwork
 
-        components['dmn'] = EnhancedDistributedMemoryNode
+        components['dmn'] = GPUAcceleratedDMN
         components['memory_trace'] = MemoryTrace
         components['btsp'] = BTSPUpdateMechanism
         components['dynamics'] = MultiTimescaleDynamicsEngine

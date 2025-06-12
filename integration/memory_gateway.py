@@ -9,7 +9,7 @@ import logging
 import time
 from collections import defaultdict
 
-from core.dmn import EnhancedDistributedMemoryNode
+from core.dmn import GPUAcceleratedDMN
 
 logger = logging.getLogger(__name__)
 
@@ -522,7 +522,7 @@ class MemoryCluster:
         # Initialize nodes
         self.nodes = []
         for i in range(num_nodes):
-            node = EnhancedDistributedMemoryNode(
+            node = GPUAcceleratedDMN(
                 node_id=f"{cluster_id}_node_{i}",
                 dimension=dimension,
                 capacity=node_capacity,
@@ -801,12 +801,12 @@ class ClusterRouter(nn.Module):
 class NodeSelector:
     """Selects appropriate nodes within a cluster for queries and updates"""
 
-    def __init__(self, nodes: List[EnhancedDistributedMemoryNode], config: Dict[str, Any]):
+    def __init__(self, nodes: List[GPUAcceleratedDMN], config: Dict[str, Any]):
         self.nodes = nodes
         self.config = config
         self.selection_history = defaultdict(int)
 
-    async def select_nodes_for_query(self, query: torch.Tensor, context: Dict[str, Any]) -> List[EnhancedDistributedMemoryNode]:
+    async def select_nodes_for_query(self, query: torch.Tensor, context: Dict[str, Any]) -> List[GPUAcceleratedDMN]:
         """Select nodes for query retrieval."""
         
         # For retrieval, query ALL nodes to ensure we don't miss memories
@@ -824,7 +824,7 @@ class NodeSelector:
         return selected_nodes
 
     async def select_node_for_update(self, content: torch.Tensor,
-                                     context: Dict[str, Any]) -> EnhancedDistributedMemoryNode:
+                                     context: Dict[str, Any]) -> GPUAcceleratedDMN:
         """Select single node for memory update"""
 
         # For updates, we want to select the best single node
