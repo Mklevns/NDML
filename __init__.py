@@ -14,6 +14,10 @@ __description__ = "Neuromorphic Distributed Memory Layer for AI Systems"
 import logging
 import warnings
 from typing import Dict, Any, Optional
+import sys as _sys
+
+# Alias lowercase package name for safe imports
+_sys.modules.setdefault('ndml', _sys.modules[__name__])
 
 # Configure default logging
 logging.getLogger(__name__).addHandler(logging.NullHandler())
