@@ -14,11 +14,14 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 class MemoryLifecycleState(Enum):
+    NEW = "new"
     ACTIVE = "active"
     AGING = "aging"
     CONSOLIDATING = "consolidating"
+    CONSOLIDATED = "consolidated"
     ARCHIVED = "archived"
     EVICTION_CANDIDATE = "eviction_candidate"
+    EVICTED = "evicted"
 
 class ConsolidationState(Enum):
     INITIAL = "initial"
@@ -128,8 +131,16 @@ class MemoryLifecycleManager:
             recency = current_time - trace.last_access
             
             # Check for explicit state assignments
-            if hasattr(trace, 'state') and trace.state == MemoryLifecycleState.EVICTION_CANDIDATE:
-                return MemoryLifecycleState.EVICTION_CANDIDATE
+            if hasattr(trace, 'state'):
+                if trace.state == MemoryLifecycleState.EVICTION_CANDIDATE:
+                    return MemoryLifecycleState.EVICTION_CANDIDATE
+                if trace.state == MemoryLifecycleState.EVICTED:
+                    return MemoryLifecycleState.EVICTED
+                if trace.state == MemoryLifecycleState.NEW:
+                    if age < self.config.age_thresholds['aging_threshold']:
+                        return MemoryLifecycleState.NEW
+                    else:
+                        return MemoryLifecycleState.ACTIVE
             
             # Consolidation-based states
             if hasattr(trace, 'temporal_metadata'):
@@ -137,10 +148,7 @@ class MemoryLifecycleManager:
                 if consolidation_state == ConsolidationState.CONSOLIDATING:
                     return MemoryLifecycleState.CONSOLIDATING
                 elif consolidation_state in [ConsolidationState.CONSOLIDATED, ConsolidationState.STABLE]:
-                    # Consolidated traces can still age if not accessed
-                    if recency > self.config.age_thresholds['aging_threshold'] * 2:
-                        return MemoryLifecycleState.AGING
-                    return MemoryLifecycleState.ACTIVE
+                    return MemoryLifecycleState.CONSOLIDATED
             
             # Age-based transitions
             if age > self.config.age_thresholds['archive_threshold']:
@@ -278,6 +286,11 @@ class MemoryLifecycleManager:
             
             # Select candidates for eviction
             selected = [trace for _, trace in priorities[:num_to_evict]]
+
+            for trace in selected:
+                if hasattr(trace, 'state'):
+                    trace.state = MemoryLifecycleState.EVICTED
+                self.stats['eviction_stats']['total_evicted'] += 1
             
             # Update statistics
             if selected:
@@ -315,7 +328,10 @@ class MemoryLifecycleManager:
                 new_state = old_state
                 
                 # Age-based transitions
-                if old_state == MemoryLifecycleState.ACTIVE:
+                if old_state == MemoryLifecycleState.NEW:
+                    if age >= self.config.age_thresholds['aging_threshold']:
+                        new_state = MemoryLifecycleState.ACTIVE
+                elif old_state == MemoryLifecycleState.ACTIVE:
                     if age > self.config.age_thresholds['aging_threshold']:
                         new_state = MemoryLifecycleState.AGING
                 elif old_state == MemoryLifecycleState.AGING:
@@ -324,6 +340,11 @@ class MemoryLifecycleManager:
                     elif recency < self.config.age_thresholds['aging_threshold'] / 2:
                         # Reactivate if recently accessed
                         new_state = MemoryLifecycleState.ACTIVE
+                elif old_state == MemoryLifecycleState.CONSOLIDATED:
+                    if age > self.config.age_thresholds['eviction_threshold']:
+                        new_state = MemoryLifecycleState.EVICTION_CANDIDATE
+                    elif recency > self.config.age_thresholds['aging_threshold']:
+                        new_state = MemoryLifecycleState.AGING
                 
                 # Record transitions
                 if old_state != new_state:
