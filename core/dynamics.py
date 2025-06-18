@@ -39,6 +39,15 @@ class CalciumDynamicsSimulator:
     """Simulates calcium dynamics for BTSP-based consolidation"""
 
     def __init__(self, threshold: float = 0.7, decay_tau: float = 10.0):
+        """Initialize the simulator.
+
+        Parameters
+        ----------
+        threshold : float, optional
+            Calcium level required to trigger downstream plasticity.
+        decay_tau : float, optional
+            Time constant (in seconds) for exponential calcium decay.
+        """
         self.threshold = threshold
         self.decay_tau = decay_tau  # Time constant in seconds
         self.calcium_level = 0.0
@@ -72,7 +81,17 @@ class BTSPConsolidationEngine:
     """BTSP-based consolidation engine with multi-timescale dynamics"""
 
     def __init__(self, config: Optional[Dict] = None):
+        """Create a new consolidation engine.
+
+        Parameters
+        ----------
+        config : dict, optional
+            Configuration dictionary. If ``None`` a default configuration is
+            used.  When ``config['use_gpu']`` is ``True`` and CUDA is available
+            GPU accelerated operations will be enabled.
+        """
         self.config = config or self._default_config()
+        self.use_gpu = torch.cuda.is_available() and self.config.get("use_gpu", False)
         self.calcium_simulator = CalciumDynamicsSimulator(
             threshold=self.config['calcium_threshold'],
             decay_tau=self.config['calcium_decay_tau']
@@ -118,21 +137,29 @@ class BTSPConsolidationEngine:
         try:
             if not hasattr(trace, 'content_embedding'):
                 return 0.0
-            interference_score = 0.0
             trace_embedding = trace.content_embedding
-            for other_trace_id, other_trace_obj in self.active_consolidations.items(): # renamed other_trace to other_trace_obj
-                if other_trace_id == getattr(trace, 'trace_id', None):
+
+            other_embeddings = []
+            strengths = []
+            for oid, otrace in self.active_consolidations.items():
+                if oid == getattr(trace, 'trace_id', None):
                     continue
-                if hasattr(other_trace_obj, 'content_embedding'):
-                    similarity = torch.cosine_similarity(
-                        trace_embedding.unsqueeze(0),
-                        other_trace_obj.content_embedding.unsqueeze(0)
-                    ).item()
-                    other_strength = 0.0
-                    if hasattr(other_trace_obj, 'temporal_metadata'):
-                        other_strength = getattr(other_trace_obj.temporal_metadata, 'consolidation_strength', 0.0)
-                    interference_score += similarity * other_strength
-            return np.clip(interference_score, 0.0, 1.0)
+                if hasattr(otrace, 'content_embedding'):
+                    other_embeddings.append(otrace.content_embedding)
+                    if hasattr(otrace, 'temporal_metadata'):
+                        strengths.append(getattr(otrace.temporal_metadata, 'consolidation_strength', 0.0))
+                    else:
+                        strengths.append(0.0)
+
+            if not other_embeddings:
+                return 0.0
+
+            other_tensor = torch.stack(other_embeddings)
+            similarities = torch.cosine_similarity(trace_embedding.unsqueeze(0), other_tensor, dim=1)
+            strength_tensor = torch.tensor(strengths, device=similarities.device)
+            interference_score = torch.sum(similarities * strength_tensor).item()
+
+            return float(np.clip(interference_score, 0.0, 1.0))
         except Exception as e:
             logger.error(f"Error computing interference: {e}")
             return 0.0
@@ -435,10 +462,25 @@ class SynapseTraceMapping:
 
 class GPUTemporalDynamics:
     """GPU-accelerated temporal dynamics with complete CPU fallbacks"""
-    
-    def __init__(self, device="cuda", use_mixed_precision=True, max_synapses=100000):
-        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
-        self.use_gpu = self.device.type == "cuda"
+
+    def __init__(self, device: str = "cuda", use_mixed_precision: bool = True,
+                 max_synapses: int = 100000, config: Optional[Dict[str, Any]] = None):
+        """Initialize GPU dynamics state.
+
+        Parameters
+        ----------
+        device : str, optional
+            Preferred device identifier (``"cuda"`` or ``"cpu"``).
+        use_mixed_precision : bool, optional
+            Enable FP16 operations when running on GPU.
+        max_synapses : int, optional
+            Maximum number of synapses that will be simulated.
+        config : dict, optional
+            Optional configuration controlling GPU usage (expects ``use_gpu`` key).
+        """
+        self.config = config or {}
+        self.use_gpu = torch.cuda.is_available() and self.config.get("use_gpu", False)
+        self.device = torch.device(device if self.use_gpu else "cpu")
         self.use_fp16 = use_mixed_precision and self.use_gpu
         self.max_synapses = max_synapses
         
@@ -851,9 +893,18 @@ class GPUTemporalDynamics:
 class IntegratedMultiTimescaleDynamics(BTSPConsolidationEngine):
     """Complete integration layer with proper timescale orchestration, including BTSP consolidation."""
     
-    def __init__(self, config=None, device="auto"):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, device: str = "auto"):
+        """Initialize the integrated dynamics engine.
+
+        Parameters
+        ----------
+        config : dict, optional
+            Combined configuration for consolidation and GPU dynamics.
+        device : str, optional
+            Preferred compute device. ``"auto"`` selects GPU when available and
+            allowed by the configuration.
+        """
         # Initialize BTSP consolidation engine first
-        # Extract consolidation-specific config, or provide an empty dict if not found
         consolidation_config = config.get('consolidation', {}) if config else {}
         super().__init__(consolidation_config)
 
@@ -862,7 +913,10 @@ class IntegratedMultiTimescaleDynamics(BTSPConsolidationEngine):
 
         # Use config for max_synapses, defaulting if not provided
         max_synapses = config.get('max_synapses', 100000) if config else 100000
-        self.gpu_dynamics = GPUTemporalDynamics(self.device, max_synapses=max_synapses)
+        self.gpu_dynamics = GPUTemporalDynamics(
+            self.device, max_synapses=max_synapses,
+            config=config
+        )
         self.synapse_mapping = SynapseTraceMapping(max_synapses)
 
         # Initialize timescale schedules (ensure TimescaleSchedule is defined or imported)
