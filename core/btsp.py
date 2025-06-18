@@ -9,6 +9,7 @@ import logging
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from collections import deque
+from pydantic import BaseModel, Field, validator
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,24 @@ class BTSPUpdateDecision:
     error_score: float
     confidence: float
 
+
+class BTSPConfig(BaseModel):
+    """Validation schema for BTSP parameters."""
+    calcium_threshold: float = Field(0.7, ge=0.0, le=2.0)
+    decay_rate: float = Field(0.95, gt=0.0, lt=1.0)
+    novelty_weight: float = Field(0.4, ge=0.0, le=1.0)
+    importance_weight: float = Field(0.3, ge=0.0, le=1.0)
+    error_weight: float = Field(0.3, ge=0.0, le=1.0)
+    learning_rate: float = Field(0.1, gt=0.0)
+    dimension: int = Field(512, ge=1)
+    device: Optional[str] = None
+
+    @validator("device")
+    def _validate_device(cls, v):
+        if v is not None and v not in {"cpu", "cuda"}:
+            raise ValueError("device must be 'cpu', 'cuda', or None")
+        return v
+
 class BTSPUpdateMechanism:
     """
     Biological Tag-and-Store Plasticity mechanism for intelligent memory updates.
@@ -31,33 +50,28 @@ class BTSPUpdateMechanism:
     """
     
     def __init__(self,
-                 calcium_threshold: float = 0.7,
-                 decay_rate: float = 0.95,
-                 novelty_weight: float = 0.4,
-                 importance_weight: float = 0.3,
-                 error_weight: float = 0.3,
-                 learning_rate: float = 0.1,
-                 dimension: int = 512,
-                 device: str = None):  # ADD device parameter
-        """
-        Initialize BTSP mechanism with proper device handling.
-        
-        Args:
-            device: Device to use ('cuda', 'cpu', or None for auto-detect)
-        """
-        self.calcium_threshold = calcium_threshold
-        self.decay_rate = decay_rate
-        self.novelty_weight = novelty_weight
-        self.importance_weight = importance_weight
-        self.error_weight = error_weight
-        self.base_learning_rate = learning_rate
-        self.dimension = dimension
-        
+                 config: Optional[Dict[str, Any]] = None,
+                 **kwargs):
+        """Initialize BTSP mechanism with parameter validation."""
+
+        # Merge explicit kwargs with config dict
+        params_dict = {**(config or {}), **kwargs}
+
+        params = BTSPConfig(**params_dict)
+
+        self.calcium_threshold = params.calcium_threshold
+        self.decay_rate = params.decay_rate
+        self.novelty_weight = params.novelty_weight
+        self.importance_weight = params.importance_weight
+        self.error_weight = params.error_weight
+        self.base_learning_rate = params.learning_rate
+        self.dimension = params.dimension
+
         # FIXED: Proper device handling
-        if device is None:
+        if params.device is None:
             self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         else:
-            self.device = device
+            self.device = params.device
             
         logger.info(f"BTSP using device: {self.device}")
         
@@ -456,10 +470,18 @@ class BTSPUpdateMechanism:
                 self.importance_weight * importance +
                 self.error_weight * error
             )
-            
+
+            logger.debug(
+                f"Calcium update input: novelty={novelty:.3f}, "
+                f"importance={importance:.3f}, error={error:.3f}, "
+                f"signal={signal_strength:.3f}"
+            )
+
             # Update calcium level
             calcium_level = await self.calcium_dynamics.update(signal_strength, current_time)
-            
+
+            logger.debug(f"Calcium level after update: {calcium_level:.3f}")
+
             return calcium_level
             
         except Exception as e:
@@ -638,6 +660,11 @@ class CalciumDynamicsSimulator:
     async def update(self, signal_strength: float, current_time: float) -> float:
         """Update calcium level based on input signal."""
         try:
+            logger.debug(
+                f"Calcium pre-update {self.calcium_level:.3f}, "
+                f"signal={signal_strength:.3f}"
+            )
+
             # Time-based decay
             if self.last_update_time > 0:
                 dt = current_time - self.last_update_time
@@ -651,7 +678,9 @@ class CalciumDynamicsSimulator:
             self.calcium_level = np.clip(self.calcium_level, 0.0, 2.0)
             
             self.last_update_time = current_time
-            
+
+            logger.debug(f"Calcium post-update {self.calcium_level:.3f}")
+
             return self.calcium_level
             
         except Exception as e:
