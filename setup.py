@@ -2,14 +2,6 @@
 from setuptools import setup, find_packages
 import os
 
-# Read version from __init__.py
-def get_version():
-    with open(os.path.join("ndml", "__init__.py"), "r") as f:
-        for line in f:
-            if line.startswith("__version__"):
-                return line.split("=")[1].strip().strip('"').strip("'")
-    return "1.0.0"
-
 # Read long description from README
 def get_long_description():
     try:
@@ -26,13 +18,14 @@ def get_long_description():
 
 setup(
     name="ndml",
-    version=get_version(),
+    version="1.0.0",  # Set the version directly as a string
     author="NDML Team",
     author_email="contact@ndml.ai",
     description="Neuromorphic Distributed Memory Layer for AI Systems",
     long_description=get_long_description(),
     long_description_content_type="text/markdown",
     url="https://github.com/ndml-team/ndml",
+    # Assumes your code is in a flat layout (e.g., ./ndml)
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
@@ -42,7 +35,7 @@ setup(
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9", 
+        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -54,12 +47,8 @@ setup(
         "numpy>=1.21.0",
         "faiss-cpu>=1.7.0",  # or faiss-gpu for GPU support
         "transformers>=4.20.0",
-        "asyncio",
         "aiohttp>=3.8.0",
         "PyYAML>=6.0",
-        "logging",
-        "pathlib",
-        "dataclasses",
         "typing_extensions>=4.0.0",
         "scipy>=1.8.0",
     ],
