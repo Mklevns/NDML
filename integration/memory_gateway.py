@@ -8,8 +8,11 @@ from typing import Dict, List, Tuple, Optional, Any, Set
 import logging
 import time
 from collections import defaultdict
+from abc import ABC, abstractmethod
 
-from core.dmn import GPUAcceleratedDMN
+from ndml.core.dmn import GPUAcceleratedDMN
+from ndml.consensus.interface import ConsensusInterface
+from ndml.consensus.neuromorphic import NeuromorphicConsensusLayer
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +38,13 @@ class MemoryGateway:
         # Initialize memory clusters
         self.clusters = self._init_clusters()
 
-        # Initialize consensus layer if enabled (stub for now)
-        self.consensus_layer = None
+        # Initialize consensus layer if enabled
+        self.consensus_layer: Optional[ConsensusInterface] = None
         if enable_consensus:
-            # Create a simple consensus stub
-            self.consensus_layer = self._create_consensus_stub()
+            self.consensus_layer = NeuromorphicConsensusLayer(
+                node_id="gateway",
+                dimension=self.dimension,
+            )
 
         # Routing and load balancing
         self.cluster_router = self._init_cluster_router()
@@ -57,21 +62,6 @@ class MemoryGateway:
 
         logger.info(f"MemoryGateway initialized: {num_clusters} clusters, {nodes_per_cluster} nodes/cluster")
         logger.info(f"Stats initialized: {self.stats}")  # Debug log to verify stats
-
-    def _create_consensus_stub(self):
-        """Create a stub consensus layer for testing."""
-        class ConsensusStub:
-            def __init__(self):
-                pass
-            
-            async def propose_memory_update(self, trace_id, content_vector, metadata):
-                # Always return success for testing
-                return True
-            
-            def get_stats(self):
-                return {"stub_consensus": True}
-        
-        return ConsensusStub()
 
     def _default_config(self) -> Dict[str, Any]:
         return {
@@ -648,8 +638,50 @@ class MemoryCluster:
                 self.nodes[i].load_checkpoint(node_checkpoint_path)
 
 
+class BaseRouterStrategy(ABC):
+    """Abstract router strategy."""
+
+    def __init__(self, num_clusters: int):
+        self.num_clusters = num_clusters
+
+    @abstractmethod
+    async def route(self, query: torch.Tensor, context: Dict[str, Any]) -> Dict[int, float]:
+        pass
+
+
+class RoundRobinRouter(BaseRouterStrategy):
+    """Round-robin routing strategy."""
+
+    def __init__(self, num_clusters: int):
+        super().__init__(num_clusters)
+        self.counter = 0
+
+    async def route(self, query: torch.Tensor, context: Dict[str, Any]) -> Dict[int, float]:
+        scores = {i: 1.0 / self.num_clusters for i in range(self.num_clusters)}
+        target = self.counter % self.num_clusters
+        scores[target] = 1.0
+        self.counter += 1
+        logger.debug(f"🔄 Round-robin: targeting cluster {target}, counter={self.counter}")
+        return scores
+
+
+class WeightedRouter(BaseRouterStrategy):
+    """Weighted static routing strategy."""
+
+    def __init__(self, num_clusters: int, weights: Optional[List[float]] = None):
+        super().__init__(num_clusters)
+        if weights and len(weights) == num_clusters:
+            self.weights = weights
+        else:
+            self.weights = [1.0 for _ in range(num_clusters)]
+
+    async def route(self, query: torch.Tensor, context: Dict[str, Any]) -> Dict[int, float]:
+        total = float(sum(self.weights))
+        return {i: self.weights[i] / total for i in range(self.num_clusters)}
+
+
 class ClusterRouter(nn.Module):
-    """Learned routing system for directing queries to clusters"""
+    """Routing system for directing queries to clusters"""
 
     def __init__(self, input_dimension: int, num_clusters: int, config: Dict[str, Any]):
         super().__init__()
@@ -658,10 +690,9 @@ class ClusterRouter(nn.Module):
         self.num_clusters = num_clusters
         self.config = config
 
-        # FIXED: Add round-robin counter for proper load balancing
-        self.round_robin_counter = 0
+        self.router_strategy: Optional[BaseRouterStrategy] = None
 
-        # Routing network
+        # Routing network used for learned strategy
         self.router_network = nn.Sequential(
             nn.Linear(input_dimension, input_dimension * 2),
             nn.ReLU(),
@@ -671,6 +702,15 @@ class ClusterRouter(nn.Module):
             nn.Linear(input_dimension, num_clusters),
             nn.Softmax(dim=-1)
         )
+
+        strategy = self.config.get('strategy', 'round_robin')
+        if strategy == 'round_robin':
+            self.router_strategy = RoundRobinRouter(num_clusters)
+        elif strategy == 'weighted':
+            self.router_strategy = WeightedRouter(num_clusters, self.config.get('weights'))
+        elif strategy != 'learned':
+            # default to round robin if unknown
+            self.router_strategy = RoundRobinRouter(num_clusters)
 
         # Training state
         self.routing_history = []
@@ -684,55 +724,11 @@ class ClusterRouter(nn.Module):
             query_cpu = query.detach().cpu() if query.device.type != 'cpu' else query
             query_norm = F.normalize(query_cpu, dim=-1)
 
-            # Get routing scores based on strategy
-            if self.config['strategy'] == 'learned':
+            if self.config.get('strategy') == 'learned':
                 scores = self.router_network(query_norm)
                 cluster_scores = {i: float(scores[i]) for i in range(self.num_clusters)}
-
-            elif self.config['strategy'] == 'round_robin':
-                # FIXED: Proper round-robin implementation
-                cluster_scores = {}
-                
-                # All clusters get base score
-                base_score = 1.0 / self.num_clusters
-                for i in range(self.num_clusters):
-                    cluster_scores[i] = base_score
-                
-                # Boost the current round-robin target
-                target_cluster = self.round_robin_counter % self.num_clusters
-                cluster_scores[target_cluster] = 1.0  # Give highest score to target
-                
-                # Increment counter for next time
-                self.round_robin_counter += 1
-                
-                logger.debug(f"🔄 Round-robin: targeting cluster {target_cluster}, counter={self.round_robin_counter}")
-
-            elif self.config['strategy'] == 'load_based':
-                # FIXED: Implement basic load-based routing
-                cluster_scores = {}
-                
-                # For now, use round-robin as fallback for load-based
-                # In a full implementation, you'd check actual cluster loads
-                base_score = 1.0 / self.num_clusters
-                for i in range(self.num_clusters):
-                    cluster_scores[i] = base_score
-                
-                # Simple load balancing: alternate clusters
-                target_cluster = self.round_robin_counter % self.num_clusters
-                cluster_scores[target_cluster] = 1.0
-                self.round_robin_counter += 1
-
             else:
-                # Default: random distribution with slight bias
-                import random
-                cluster_scores = {}
-                target_cluster = random.randint(0, self.num_clusters - 1)
-                
-                for i in range(self.num_clusters):
-                    if i == target_cluster:
-                        cluster_scores[i] = 0.7  # Bias toward target
-                    else:
-                        cluster_scores[i] = 0.3 / (self.num_clusters - 1)
+                cluster_scores = await self.router_strategy.route(query_norm, context)
 
         # Record routing decision for learning
         self.routing_history.append({
@@ -785,7 +781,7 @@ class ClusterRouter(nn.Module):
             'config': self.config,
             'routing_history': self.routing_history[-1000:],  # Keep last 1000
             'performance_feedback': self.performance_feedback[-1000:],
-            'round_robin_counter': self.round_robin_counter
+            'strategy_state': getattr(self.router_strategy, '__dict__', {})
         }
         torch.save(checkpoint, filepath)
 
@@ -795,7 +791,10 @@ class ClusterRouter(nn.Module):
         self.load_state_dict(checkpoint['model_state_dict'])
         self.routing_history = checkpoint.get('routing_history', [])
         self.performance_feedback = checkpoint.get('performance_feedback', [])
-        self.round_robin_counter = checkpoint.get('round_robin_counter', 0)
+        if self.router_strategy:
+            state = checkpoint.get('strategy_state', {})
+            for k, v in state.items():
+                setattr(self.router_strategy, k, v)
 
 
 class NodeSelector:
@@ -871,7 +870,7 @@ class LoadBalancer:
         self.clusters = clusters
         self.update_counts = defaultdict(int)
         self.query_counts = defaultdict(int)
-        self.last_rebalance = time.time()
+        self.last_rebalance = time.perf_counter()
 
     async def record_update(self, cluster_idx: int):
         """Record an update to a cluster"""
@@ -883,7 +882,7 @@ class LoadBalancer:
 
     async def rebalance_if_needed(self):
         """Rebalance load if thresholds are exceeded"""
-        current_time = time.time()
+        current_time = time.perf_counter()
 
         # Check if rebalance interval has elapsed
         if current_time - self.last_rebalance < 300:  # 5 minutes

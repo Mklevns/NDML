@@ -10,14 +10,22 @@ Contains the fundamental building blocks of the NDML system:
 - Memory lifecycle management
 """
 
-from .dmn import EnhancedDistributedMemoryNode
+try:
+    from .dmn import EnhancedDistributedMemoryNode
+except ImportError:  # Fallback if class is missing
+    EnhancedDistributedMemoryNode = None  # type: ignore
+
 from .memory_trace import MemoryTrace, TemporalMetadata, ConsolidationState
 from .dynamics import MultiTimescaleDynamicsEngine, TemporalState, TemporalEvent
 from .btsp import BTSPUpdateMechanism, BTSPUpdateDecision
 from .lifecycle import MemoryLifecycleManager, MemoryLifecycleState, LifecycleConfig
 
-__all__ = [
-    'EnhancedDistributedMemoryNode',
+if EnhancedDistributedMemoryNode is not None:
+    __all__ = ['EnhancedDistributedMemoryNode']
+else:
+    __all__ = []
+
+__all__ += [
     'MemoryTrace',
     'TemporalMetadata',
     'ConsolidationState',
@@ -30,3 +38,4 @@ __all__ = [
     'MemoryLifecycleState',
     'LifecycleConfig',
 ]
+
