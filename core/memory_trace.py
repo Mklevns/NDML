@@ -3,11 +3,19 @@ import torch
 import time
 import numpy as np
 import hashlib
-from typing import Dict, Any, Optional, Union, List, Set
+from typing import Dict, Any, Optional, List, Set, TypedDict
 from dataclasses import dataclass, field
 from enum import Enum
-from core.lifecycle 
 from .lifecycle import MemoryLifecycleState
+
+
+class MemoryTraceContext(TypedDict, total=False):
+    """Typed dictionary for memory trace context."""
+    task_id: str
+    user_id: str
+    task_type: str
+    user_feedback: str
+    associations: Dict[str, Any]
 
 
 # Define enums FIRST before they're used
@@ -36,6 +44,31 @@ class TemporalMetadata:
         if self.consolidation_state is None:
             self.consolidation_state = ConsolidationState.INITIAL
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize temporal metadata to a dictionary."""
+        return {
+            'consolidation_cycles': self.consolidation_cycles,
+            'last_consolidation': self.last_consolidation,
+            'temporal_weight': self.temporal_weight,
+            'phase_coherence': self.phase_coherence,
+            'consolidation_state': self.consolidation_state.value,
+            'consolidation_strength': self.consolidation_strength,
+            'temporal_coherence': self.temporal_coherence,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'TemporalMetadata':
+        """Create an instance from a dictionary."""
+        return cls(
+            consolidation_cycles=data.get('consolidation_cycles', 0),
+            last_consolidation=data.get('last_consolidation', 0.0),
+            temporal_weight=data.get('temporal_weight', 1.0),
+            phase_coherence=data.get('phase_coherence', 0.0),
+            consolidation_state=ConsolidationState(data.get('consolidation_state', 'initial')),
+            consolidation_strength=data.get('consolidation_strength', 0.0),
+            temporal_coherence=data.get('temporal_coherence', 1.0),
+        )
+
 
 @dataclass
 class MemoryTrace:
@@ -43,7 +76,7 @@ class MemoryTrace:
 
     # Core content
     content: torch.Tensor  # Embedding vector
-    context: Dict[str, Any]  # Rich contextual metadata
+    context: MemoryTraceContext  # Rich contextual metadata
 
     # Temporal information
     timestamp: float  # Creation time
@@ -65,7 +98,7 @@ class MemoryTrace:
     creation_node: str = ""  # Originating node ID
     consolidation_level: int = 0  # 0=episodic, 1=working, 2=semantic
     eviction_protection: bool = False  # Protect from eviction
-    MemoryLifecycleState = MemoryLifecycleState.ACTIVE
+    state: MemoryLifecycleState = MemoryLifecycleState.ACTIVE
 
     # Relationships
     associated_traces: Set[str] = field(default_factory=set)  # Related memories
@@ -97,8 +130,8 @@ class MemoryTrace:
         """Serialize to dictionary for storage/transmission"""
         result = {
             'trace_id': self.trace_id,
-            'content': self.content.cpu().numpy().tolist(),  # Always store as CPU numpy
-            'context': self.context,
+            'content': self.content.cpu().numpy().tolist(),
+            'context': dict(self.context),
             'timestamp': self.timestamp,
             'last_access': self.last_access,
             'access_pattern': self.access_pattern,
@@ -113,21 +146,13 @@ class MemoryTrace:
             'eviction_protection': self.eviction_protection,
             'associated_traces': list(self.associated_traces),
             'causal_predecessors': list(self.causal_predecessors),
-            'interference_traces': list(self.interference_traces)
+            'interference_traces': list(self.interference_traces),
             'state': self.state.value,
         }
         
         # Add temporal metadata if present
         if self.temporal_metadata is not None:
-            result['temporal_metadata'] = {
-                'consolidation_cycles': self.temporal_metadata.consolidation_cycles,
-                'last_consolidation': self.temporal_metadata.last_consolidation,
-                'temporal_weight': self.temporal_metadata.temporal_weight,
-                'phase_coherence': self.temporal_metadata.phase_coherence,
-                'consolidation_state': self.temporal_metadata.consolidation_state.value,
-                'consolidation_strength': self.temporal_metadata.consolidation_strength,
-                'temporal_coherence': self.temporal_metadata.temporal_coherence
-            }
+            result['temporal_metadata'] = self.temporal_metadata.to_dict()
         
         return result
 
@@ -289,16 +314,15 @@ class MemoryTrace:
 
         trace = cls(
             content=content,
-            context=data['context'],
+            context=data.get('context', {}),
             timestamp=data['timestamp'],
-            last_access=data['last_access'],
-            salience=data['salience'],
-            trace_id=data['trace_id']
+            last_access=data.get('last_access', data['timestamp']),
+            salience=data.get('salience', 0.0),
+            trace_id=data.get('trace_id', '')
         )
 
-        # Restore all fields
         trace.access_pattern = data.get('access_pattern', [])
-        trace.current_salience = data.get('current_salience', data['salience'])
+        trace.current_salience = data.get('current_salience', trace.salience)
         trace.importance_votes = data.get('importance_votes', {})
         trace.access_count = data.get('access_count', 0)
         trace.successful_retrievals = data.get('successful_retrievals', 0)
@@ -309,23 +333,11 @@ class MemoryTrace:
         trace.associated_traces = set(data.get('associated_traces', []))
         trace.causal_predecessors = set(data.get('causal_predecessors', []))
         trace.interference_traces = set(data.get('interference_traces', []))
-        trace = cls(if 'state' in data:
-        trace.state = MemoryLifecycleState(data['state'])
 
-    
-)
+        if 'state' in data:
+            trace.state = MemoryLifecycleState(data['state'])
 
-        # Restore temporal metadata if present
         if 'temporal_metadata' in data:
-            tm_data = data['temporal_metadata']
-            trace.temporal_metadata = TemporalMetadata(
-                consolidation_cycles=tm_data.get('consolidation_cycles', 0),
-                last_consolidation=tm_data.get('last_consolidation', 0.0),
-                temporal_weight=tm_data.get('temporal_weight', 1.0),
-                phase_coherence=tm_data.get('phase_coherence', 0.0),
-                consolidation_state=ConsolidationState(tm_data.get('consolidation_state', 'initial')),
-                consolidation_strength=tm_data.get('consolidation_strength', 0.0),
-                temporal_coherence=tm_data.get('temporal_coherence', 1.0)
-            )
+            trace.temporal_metadata = TemporalMetadata.from_dict(data['temporal_metadata'])
 
         return trace
